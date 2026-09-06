@@ -1,0 +1,45 @@
+/*
+  LinkForge design tokens — "the display case".
+
+  The page is a bright, warm window. Text is ink. Hairlines, not borders.
+  There is NO fixed accent colour: --lf-accent is set at runtime from the
+  current theme's dark tile colour, so the whole UI quietly retunes when the
+  theme changes (300ms). That is the one "trick" of the site.
+*/
+:root {
+  /* Page background — one very soft vertical sky gradient. This IS the stage. */
+  --lf-sky-top: #e4e8f4;
+  --lf-sky-bottom: #f1eadf;
+
+  /* Ink + text. --lf-muted is #585D74 (darkened from the brief's #6B7086 so it
+     passes AA 4.5:1 against the sky's lightest stop #E4E8F4). */
+  --lf-ink: #23273a;
+  --lf-muted: #585d74;
+  --lf-hairline: rgba(35, 39, 58, 0.14);
+
+  /* Panel — warm white, NOT sky. */
+  --lf-panel-bg: #fbf9f5;
+
+  /* Accent — default is Verdant's dark tile (#3B4A3E). JS overrides this from
+     the active theme's `dark` value. Everything accent-coloured reads it. */
+  --lf-accent: #3b4a3e;
+
+  /* Radius scale, by hierarchy. */
+  --lf-r-pill: 999px;
+  --lf-r-input: 10px;
+  --lf-r-panel: 16px;
+
+  /* The only two shadows on the whole site: ContactShadows (in R3F) and this. */
+  --lf-sh-panel: 0 12px 40px rgba(35, 39, 58, 0.1);
+
+  /* Spacing scale (kept from before for layout math). */
+  --lf-space-1: 0.25rem;
+  --lf-space-2: 0.5rem;
+  --lf-space-3: 0.75rem;
+  --lf-space-4: 1rem;
+  --lf-space-5: 1.5rem;
+  --lf-space-6: 2rem;
+  --lf-space-8: 3rem;
+  --lf-space-10: 4rem;
+  --lf-space-12: 6rem;
+}

@@ -1,0 +1,488 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+
+/*
+  LinkForge — "the display case".
+  Quiet, warm, well-lit. The 3D object is the only colourful thing.
+  The page IS the diorama stage: one soft sky gradient, ink text, hairlines.
+*/
+
+@theme inline {
+  --color-ink: var(--lf-ink);
+  --color-muted: var(--lf-muted);
+  --color-panel: var(--lf-panel-bg);
+  --color-accent: var(--lf-accent);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+.lf-audio-toggle { width: 34px; height: 34px; border: 1px solid var(--lf-ink); border-radius: 999px; background: transparent; color: var(--lf-ink); display: inline-grid; place-items: center; cursor: pointer; padding: 0; overflow: hidden; }
+.lf-audio-speaker { display: grid; place-items: center; width: 100%; height: 100%; }
+.lf-audio-speaker svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.lf-audio-speaker path { stroke: currentColor; }
+.lf-audio-wave { opacity: .25; transform-origin: 12px 12px; transition: opacity 240ms ease, transform 240ms ease; }
+.lf-audio-toggle[aria-pressed="true"] .lf-audio-wave { opacity: 1; animation: lf-audio-breathe 2.2s ease-in-out infinite; }
+.lf-audio-toggle[aria-pressed="true"] .lf-audio-wave--two { animation-delay: .18s; }
+@keyframes lf-audio-breathe { 0%,100% { transform: scale(.92); } 50% { transform: scale(1.08); } }
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  /* The sky IS the stage. Fixed so 3D objects sit on an unbroken ground. */
+  background: var(--lf-sky-top);
+  background-image: linear-gradient(
+    to bottom,
+    var(--lf-sky-top) 0%,
+    var(--lf-sky-bottom) 100%
+  );
+  background-attachment: fixed;
+  color: var(--lf-ink);
+  font-family: var(--font-display), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+/* Display type: one family, heavy optical size, tight tracking. */
+.lf-display {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 500;
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  color: var(--lf-ink);
+}
+
+/* Small UI text: 13px, medium, NEVER all caps. */
+.lf-ui-sm {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.4;
+}
+
+.lf-muted {
+  color: var(--lf-muted);
+}
+
+/* The recurring caption-plate device: hairline top rule, mono URL, plain line. */
+.lf-plate {
+  border-top: 1px solid var(--lf-hairline);
+  padding-top: 8px;
+  display: grid;
+  gap: 2px;
+  max-width: 32ch;
+}
+.lf-plate__url {
+  font-family: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: var(--lf-ink);
+}
+.lf-plate__meta {
+  font-size: 13px;
+  color: var(--lf-muted);
+  transition: color 200ms ease;
+}
+
+/* Keyboard focus: 2px accent ring, offset. */
+.lf-focus:focus-visible {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* Pills / chips. */
+.lf-pill {
+  font-family: var(--font-display), sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--lf-r-pill);
+  padding: 7px 14px;
+  border: 1px solid var(--lf-hairline);
+  background: transparent;
+  color: var(--lf-ink);
+  cursor: pointer;
+  transition: background-color 200ms ease, border-color 200ms ease,
+    color 200ms ease;
+}
+.lf-pill[data-active="true"] {
+  background: var(--lf-accent);
+  border-color: var(--lf-accent);
+  color: #fff;
+}
+
+/* Buttons / inputs — radius 10. Panel — radius 16. Nothing else rounded. */
+.lf-btn {
+  font-family: var(--font-display), sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: var(--lf-r-input);
+  border: 1px solid var(--lf-accent);
+  background: var(--lf-accent);
+  color: #fff;
+  cursor: pointer;
+  transition: filter 150ms ease, background-color 200ms ease,
+    border-color 200ms ease;
+}
+.lf-btn:hover {
+  filter: brightness(1.06);
+}
+.lf-btn:active {
+  filter: brightness(0.96);
+}
+.lf-btn--ghost {
+  background: transparent;
+  color: var(--lf-ink);
+  border-color: var(--lf-hairline);
+}
+.lf-linkbtn {
+  font-family: var(--font-display), sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--lf-ink);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--lf-hairline);
+}
+.lf-linkbtn:hover {
+  text-decoration-color: var(--lf-accent);
+}
+
+.lf-input {
+  font-family: var(--font-display), sans-serif;
+  font-size: 15px;
+  border-radius: var(--lf-r-input);
+  border: 1px solid var(--lf-hairline);
+  background: #fff;
+  color: var(--lf-ink);
+  padding: 12px 14px;
+}
+.lf-input::placeholder {
+  color: var(--lf-muted);
+}
+.lf-input:focus-visible {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 2px;
+}
+
+/* The single panel: warm white, one shadow, radius 16. */
+.lf-panel {
+  background: var(--lf-panel-bg);
+  border-radius: var(--lf-r-panel);
+  box-shadow: var(--lf-sh-panel);
+}
+
+/* Segmented control (Experience | Scan). */
+.lf-seg {
+  display: inline-flex;
+  border: 1px solid var(--lf-hairline);
+  border-radius: var(--lf-r-pill);
+  overflow: hidden;
+  background: transparent;
+}
+.lf-seg button {
+  font-family: var(--font-display), sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 16px;
+  border: none;
+  background: transparent;
+  color: var(--lf-ink);
+  cursor: pointer;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+.lf-seg button[data-active="true"] {
+  background: var(--lf-accent);
+  color: #fff;
+}
+
+/* Native range styled to spec: hairline track, accent fill, ink-ringed thumb. */
+.lf-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: var(--lf-hairline);
+  border-radius: 999px;
+  outline: none;
+}
+.lf-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--lf-accent);
+  border: 2px solid var(--lf-ink);
+  cursor: pointer;
+}
+.lf-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--lf-accent);
+  border: 2px solid var(--lf-ink);
+  cursor: pointer;
+}
+.lf-range:focus-visible {
+  outline: 2px solid var(--lf-accent);
+  outline-offset: 4px;
+}
+
+/* Numbered rule for the "how it works" sequence (a real sequence → numbers ok). */
+.lf-step__rule {
+  border-top: 1px solid var(--lf-hairline);
+  padding-top: 8px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--lf-muted);
+}
+
+/* Landing page layout. */
+.lf-home {
+  min-height: 100vh;
+  display: grid;
+  gap: 8px;
+  overflow-x: hidden;
+}
+.lf-home__nav {
+  width: min(100% - 48px, 1180px);
+  margin: 0 auto;
+  padding: 24px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.lf-home__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--lf-ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+.lf-home__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--lf-accent);
+  border-radius: 8px;
+  color: var(--lf-accent);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+}
+.lf-home__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.lf-home__links a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--lf-ink);
+  text-decoration: none;
+  font-size: 13px;
+  transition: background-color 200ms ease, border-color 200ms ease, transform 200ms ease;
+}
+.lf-home__links a:hover {
+  background: #ffffff8a;
+  border-color: var(--lf-hairline);
+  transform: translateY(-1px);
+}
+.lf-home__start {
+  width: min(100% - 48px, 1180px);
+  margin: -4px auto 0;
+  display: grid;
+  grid-template-columns: minmax(0, .62fr) minmax(0, 1.38fr);
+  gap: 24px;
+  align-items: start;
+  padding: 26px 0 10px;
+  border-top: 1px solid var(--lf-hairline);
+}
+.lf-home__eyebrow {
+  margin: 0 0 8px;
+  color: var(--lf-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px;
+}
+.lf-home__start h2 {
+  margin: 0;
+  max-width: 12ch;
+  font-size: clamp(1.7rem, 3vw, 2.7rem);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 500;
+}
+.lf-home__starter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.lf-home__starter {
+  min-height: 132px;
+  display: grid;
+  align-content: space-between;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid #ffffffbd;
+  border-radius: 16px;
+  color: var(--lf-ink);
+  text-decoration: none;
+  background: linear-gradient(180deg, #ffffff8f, #f7f3eb5e);
+  box-shadow: 0 14px 34px rgba(57, 67, 47, .08), inset 0 1px 0 rgba(255,255,255,.75);
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+.lf-home__starter:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--lf-accent) 38%, white);
+  box-shadow: 0 18px 44px rgba(57, 67, 47, .13), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.lf-home__starter span {
+  font-size: 17px;
+  font-weight: 600;
+}
+.lf-home__starter small {
+  color: var(--lf-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.lf-home__proof {
+  width: min(100% - 48px, 1180px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 8px 0 18px;
+}
+.lf-home__proof-item,
+.lf-home__audio {
+  min-height: 74px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--lf-hairline);
+}
+.lf-home__proof-item {
+  display: grid;
+  gap: 2px;
+}
+.lf-home__proof-item strong {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 23px;
+  line-height: 1;
+  font-weight: 500;
+}
+.lf-home__proof-item span,
+.lf-home__audio span {
+  color: var(--lf-muted);
+  font-size: 13px;
+}
+.lf-home__audio {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.lf-home__how {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+.lf-home__step {
+  display: grid;
+  gap: 6px;
+}
+.lf-home__step p:last-child {
+  margin: 0;
+  font-size: 17px;
+}
+@media (min-width: 720px) {
+  .lf-home__how {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+  }
+}
+@media (max-width: 900px) {
+  .lf-home__nav {
+    width: calc(100% - 32px);
+    align-items: flex-start;
+  }
+  .lf-home__links {
+    max-width: 260px;
+  }
+  .lf-home__start {
+    width: calc(100% - 32px);
+    grid-template-columns: 1fr;
+  }
+  .lf-home__starter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lf-home__proof {
+    width: calc(100% - 32px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .lf-home__nav {
+    display: grid;
+  }
+  .lf-home__links {
+    justify-content: flex-start;
+  }
+  .lf-home__starter-grid,
+  .lf-home__proof {
+    grid-template-columns: 1fr;
+  }
+}
+.lf-home__footer {
+  max-width: 1180px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 28px 24px 48px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  border-top: 1px solid var(--lf-hairline);
+}
+.lf-home__footer span {
+  font-weight: 500;
+}
+
+/* Caption plate hover-brighten (used on the shelf). */
+.lf-plate--hover .lf-plate__meta {
+  color: var(--lf-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
