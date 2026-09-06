@@ -54,4 +54,4 @@ next-env.d.ts
 /.claude/
 
 # optional local/licensed audio loops
-/public/audio/
+# /public/audio/
