@@ -1,11 +1,9 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { HeroPreview } from "@/components/landing/HeroPreview";
 import { ExperienceShelf } from "@/components/landing/ExperienceShelf";
-import { AudioToggle } from "@/components/ui/AudioToggle";
-import { useAudioStore } from "@/stores/audioStore";
-import { useEffect } from "react";
+import { AudioControl } from "@/components/audio/AudioControl";
 
 const STARTERS = [
   { href: "/create", title: "Create", text: "Build a scannable 3D QR world from any URL." },
@@ -21,7 +19,6 @@ const PROOF = [
 ];
 
 export default function Home() {
-  useEffect(() => { useAudioStore.getState().setActivity("landing"); }, []);
   return (
     <main className="lf-home">
       <header className="lf-home__nav" aria-label="Primary navigation">
@@ -29,12 +26,14 @@ export default function Home() {
           <span className="lf-home__mark" aria-hidden="true">LF</span>
           <span>LinkForge</span>
         </Link>
-        <nav className="lf-home__links">
+        <div className="lf-home__actions"><nav className="lf-home__links">
           <Link href="/create" className="lf-focus">Create</Link>
           <Link href="/create?mode=living" className="lf-focus">Living</Link>
           <Link href="/create?mode=city" className="lf-focus">City</Link>
           <Link href="/verify" className="lf-focus">Verify</Link>
         </nav>
+          <AudioControl />
+        </div>
       </header>
 
       <HeroPreview />
@@ -64,8 +63,7 @@ export default function Home() {
           </div>
         ))}
         <div className="lf-home__audio">
-          <span>Ambient room tone</span>
-          <AudioToggle />
+          <span>Ambient room tone available from the header control</span>
         </div>
       </section>
 
@@ -96,3 +94,7 @@ export default function Home() {
     </main>
   );
 }
+
+
+
+

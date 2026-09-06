@@ -1,19 +1,18 @@
-"use client";
+﻿"use client";
 
 /**
- * useReveal — the single reveal driver shared by every diorama experience.
+ * useReveal â€” the single reveal driver shared by every diorama experience.
  *
  * `target` is 0 (Experience) or 1 (Scan). The returned ref eases toward it over
  * REVEAL_SECONDS with easeInOutCubic; reverse is identical. Under reduced motion
- * it snaps. Read `ref.current` inside useFrame — it never triggers a re-render.
+ * it snaps. Read `ref.current` inside useFrame â€” it never triggers a re-render.
  *
  * A companion `buildRef` drives the first-load build-in (platform tiles rise,
- * then the object grows). It runs 0 → 1 once per mount / buildNonce; the scenes
+ * then the object grows). It runs 0 â†’ 1 once per mount / buildNonce; the scenes
  * multiply object presence by min(build, 1 - reveal).
  */
 
 import { useEffect, useRef } from "react";
-import { audioEngine } from "@/lib/audio/engine";
 
 export const REVEAL_SECONDS = 1.6;
 export const BUILD_SECONDS = 1.5; // 0.6 s tiles + 0.9 s object
@@ -39,7 +38,6 @@ export function useRevealDriver(
     const tgt = targetRef.current;
     if (reducedMotion) {
       revealRef.current = tgt;
-      audioEngine.setReveal(tgt);
       return tgt;
     }
     const rate = delta / REVEAL_SECONDS;
@@ -47,7 +45,6 @@ export function useRevealDriver(
     if (Math.abs(tgt - cur) <= rate) revealRef.current = tgt;
     else revealRef.current = cur + Math.sign(tgt - cur) * rate;
     const value = easeInOutCubic(revealRef.current);
-    audioEngine.setReveal(value);
     return value;
   };
 
@@ -74,3 +71,4 @@ export function useBuildDriver(buildNonce: number, reducedMotion: boolean) {
 
   return { buildRef, step };
 }
+

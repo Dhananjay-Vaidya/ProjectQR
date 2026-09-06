@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
@@ -15,7 +15,6 @@ import { detectQuality } from "@/lib/renderQuality";
 import { usePrefersReducedMotion, useSceneActive } from "@/lib/hooks";
 import { QUIET_ZONE_MODULES, type QRModel } from "@/types/qr";
 import { buildGenerativeSeed, domainRng } from "@/lib/generativeSeed";
-import { audioEngine } from "@/lib/audio/engine";
 import { studioHalfHeight } from "@/lib/living/studioFraming";
 export interface LivingTreeQRProps extends RendererProps {
     view: "experience" | "scan";
@@ -185,8 +184,6 @@ function LivingScene({ model, tree, scan, theme, leafPalette, customLeafColors, 
         const was = progress.current;
         progress.current = p;
         const seconds = p * LIVING_REVEAL_SECONDS, finish = ease((seconds - .6) / .15), camMix = ease(seconds / .6);
-        if (onToggle)
-            audioEngine.setReveal(p);
         if (settled.current !== (p === 1)) {
             settled.current = p === 1;
             onSettled(p === 1);
@@ -375,3 +372,4 @@ function LivingScene({ model, tree, scan, theme, leafPalette, customLeafColors, 
     </group>
   </>;
 }
+

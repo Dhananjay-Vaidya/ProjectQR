@@ -1,12 +1,12 @@
-"use client";
+﻿"use client";
 
 /**
- * HeroPreview — the display case's front window.
+ * HeroPreview â€” the display case's front window.
  *
  * Two columns 5/7 on desktop: copy left, a live Verdant Living diorama right,
  * sitting directly on the sky (no card, no screenshot). One orchestrated first-
  * load moment: platform tiles rise, then the tree grows (the DioramaStage build
- * driver). Nothing else animates on load or scroll. Reduced motion → final state.
+ * driver). Nothing else animates on load or scroll. Reduced motion â†’ final state.
  */
 
 import { useMemo, useState } from "react";
@@ -17,6 +17,7 @@ import { DEFAULT_QR_COLORS, type QRModel } from "@/types/qr";
 import { detectWebgl } from "@/lib/hooks";
 import { CaptionPlate, ThemeAccent } from "@/components/ui/DioramaChrome";
 import { DEFAULT_THEME } from "@/lib/living/themes";
+import { EnterWithSound } from "@/components/audio/AudioControl";
 
 const LivingTreeQR = dynamic(() => import("@/components/qr/LivingTreeQR"), {
   ssr: false,
@@ -106,11 +107,12 @@ export function HeroPreview() {
           ) : (
             <div style={{ width: "100%", aspectRatio: "1/1" }} aria-hidden />
           )}
+          <EnterWithSound />
         </div>
         {previewModel ? (
           <CaptionPlate
             url={raw.trim() || SEED}
-            meta={`Living, Verdant theme, ${previewModel.size}×${previewModel.size}`}
+            meta={`Living, Verdant theme, ${previewModel.size}Ã—${previewModel.size}`}
           />
         ) : null}
       </div>
@@ -140,3 +142,5 @@ export function HeroPreview() {
     </section>
   );
 }
+
+
