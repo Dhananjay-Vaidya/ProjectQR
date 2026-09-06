@@ -52,3 +52,6 @@ next-env.d.ts
 
 # local agent settings
 /.claude/
+
+# optional local/licensed audio loops
+/public/audio/
