@@ -23,6 +23,7 @@ import {
   REVEAL_TRUNK_DOWN,
 } from "@/lib/living/timeline";
 import { livingMaterial, rainGeometry, slabGeometry, tuftGeometry, woodGeometry } from "@/lib/living/geometry";
+import { birdWingGeometry } from "@/lib/city/cityMeshes";
 import { detectQuality } from "@/lib/renderQuality";
 import { usePrefersReducedMotion, useSceneActive } from "@/lib/hooks";
 import { QUIET_ZONE_MODULES, type QRModel } from "@/types/qr";
@@ -189,12 +190,29 @@ interface SceneProps {
 
 interface Falling {
   leaf: number;
-  target: Vec3;
-  age: number;
-  slot: number;
+  x: number;
+  y: number;
+  z: number;
+  baseX: number;
+  baseZ: number;
+  phaseX: number;
+  phaseZ: number;
+  spinA: number;
+  spinB: number;
+  rateA: number;
+  rateB: number;
+  landed: boolean;
+  bounceT: number;
+  landX: number;
+  landZ: number;
+  snapX: number;
+  snapZ: number;
+  yaw: number;
+  tint: number;
 }
 
 const ISO_DIR = new THREE.Vector3(1, 0.8, 1).normalize();
+const TAU = Math.PI * 2;
 
 function lowSaturation(hex: string, factor: number): THREE.Color {
   const c = new THREE.Color(hex);
@@ -228,6 +246,7 @@ function LivingScene({
   const grass = useRef<THREE.InstancedMesh>(null);
   const fallen = useRef<THREE.InstancedMesh>(null);
   const rain = useRef<THREE.InstancedMesh>(null);
+  const perchBirds = useRef<THREE.InstancedMesh>(null);
   const wood = useRef<THREE.Mesh>(null);
   const slab = useRef<THREE.Mesh>(null);
   const ground = useRef<THREE.Mesh>(null);
@@ -246,13 +265,19 @@ function LivingScene({
   const rng = useMemo(() => domainRng(buildGenerativeSeed(model.encodedUrl), "motionSeed"), [model.encodedUrl]);
   const side = model.size + QUIET_ZONE_MODULES * 2;
 
-  const fallState = useRef<{
-    next: number;
-    fall: Falling | null;
-    rest: { position: Vec3; yaw: number; tint: number }[];
-    cursor: number;
-    births: Map<number, number>;
-  }>({ next: 22, fall: null, rest: tree.fallen.map((f) => ({ position: [...f.position] as Vec3, yaw: f.yaw, tint: f.tint })), cursor: 0, births: new Map() });
+  const makeFallState = () => ({
+    falling: [] as Falling[],
+    detached: new Set<number>(),
+    rest: tree.fallen
+      .slice(0, THEMES[theme].fallenBase)
+      .map((f) => ({ position: [...f.position] as Vec3, yaw: f.yaw, tint: f.tint })),
+    cursor: 0,
+    detachTimer: 60 / Math.max(1, THEMES[theme].leafFall),
+    gustTimer: 20 + Math.random() * 20,
+    gustUntil: 0,
+  });
+  const fallState = useRef(makeFallState());
+  const fallingByLeaf = useMemo(() => new Map<number, Falling>(), []);
 
   // Live-regeneration morph: remember the previous canopy's resting positions so
   // new leaves grow from 0 while carried-over leaves lerp to their new home.
@@ -269,14 +294,10 @@ function LivingScene({
     }
     prevLeaf.current = { pos, len: old.leaves.length };
     treeRef.current = tree;
-    fallState.current = {
-      next: 22,
-      fall: null,
-      rest: tree.fallen.map((f) => ({ position: [...f.position] as Vec3, yaw: f.yaw, tint: f.tint })),
-      cursor: 0,
-      births: new Map(),
-    };
+    fallState.current = makeFallState();
+    fallingByLeaf.clear();
     regen.current = reduced ? 1 : 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tree, reduced]);
 
   const resources = useMemo(() => {
@@ -298,8 +319,29 @@ function LivingScene({
       side: THREE.DoubleSide,
       toneMapped: false,
     });
-    return { leaf, tile, plate, lm, tm, gm, fm, base, wm, sm, rm, wood: woodGeometry(tree), slab: slabGeometry(side), tuft: tuftGeometry(), rain: rainGeometry() };
+    const birdMat = new THREE.MeshBasicMaterial({ color: "#23273A", side: THREE.DoubleSide, toneMapped: false });
+    return { leaf, tile, plate, lm, tm, gm, fm, base, wm, sm, rm, birdMat, wood: woodGeometry(tree), slab: slabGeometry(side), tuft: tuftGeometry(), rain: rainGeometry(), bird: birdWingGeometry() };
   }, [tree, side, flatUniform]);
+
+  const birdCount = mobile ? 3 : 5;
+  const perch = useMemo(() => {
+    const r = domainRng(buildGenerativeSeed(model.encodedUrl), "particleSeed");
+    const tips = tree.branches.filter((b) => b.primary).map((b) => b.to as Vec3);
+    for (let i = tips.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [tips[i], tips[j]] = [tips[j], tips[i]];
+    }
+    return tips.slice(0, birdCount).map((p) => ({
+      pos: p,
+      dir: [r() * 2 - 1, 0.6 + r() * 0.6, r() * 2 - 1] as Vec3,
+      turnAt: 8 + r() * 7,
+      phase: r() * TAU,
+    }));
+  }, [tree, model.encodedUrl, birdCount]);
+  const birdState = useRef({ clock: 0, wasRevealed: view === "scan", returnClock: -1, turns: perch.map((p) => p.turnAt) });
+  useEffect(() => {
+    birdState.current = { clock: 0, wasRevealed: false, returnClock: -1, turns: perch.map((p) => p.turnAt) };
+  }, [perch]);
 
   // Target colours (theme + custom palette). Frame loop lerps toward these.
   const target = useMemo(() => {
@@ -420,7 +462,7 @@ function LivingScene({
       [leaves.current, tree.leaves.length],
       [tiles.current, model.size ** 2],
       [grass.current, tree.grass.length],
-      [fallen.current, 60],
+      [fallen.current, 90],
       [rain.current, RAIN_MAX],
     ] as const) {
       if (!mesh) continue;
@@ -536,31 +578,172 @@ function LivingScene({
       rain.current.instanceMatrix.needsUpdate = true;
     }
 
+    /* ---- perched birds: take off on reveal, glide back on return ---- */
+    if (perchBirds.current) {
+      const bs = birdState.current;
+      bs.clock += delta;
+      if (bs.wasRevealed && p < 0.98) {
+        bs.returnClock = 0;
+        bs.wasRevealed = false;
+      }
+      if (!bs.wasRevealed && p > 0.98) {
+        bs.wasRevealed = true;
+        bs.returnClock = -1;
+      }
+      if (bs.returnClock >= 0) bs.returnClock += delta;
+      const flapFast = reduced ? 0 : Math.sin(bs.clock * TAU * 4);
+      for (let i = 0; i < perch.length; i++) {
+        const pc = perch[i];
+        let bx = pc.pos[0];
+        let by = pc.pos[1];
+        let bz = pc.pos[2];
+        let sc = 1;
+        let flap = 0.14;
+        let tilt = 0;
+        if (reduced) {
+          sc = p < 0.5 ? 1 : 0;
+        } else if (p > 0.001 && bs.returnClock < 0) {
+          const to = clamp01((seconds - i * 0.04) / 0.4);
+          bx += pc.dir[0] * to * 7;
+          by += pc.dir[1] * to * 7;
+          bz += pc.dir[2] * to * 7;
+          sc = 1 - to;
+          flap = flapFast * 0.9;
+        } else if (bs.returnClock >= 0) {
+          const rt = clamp01((bs.returnClock - 1.5 - i * 0.3) / 0.4);
+          if (rt <= 0) {
+            sc = 0;
+          } else {
+            const ex = pc.pos[0] + pc.dir[0] * 8;
+            const ey = pc.pos[1] + 5;
+            const ez = pc.pos[2] + pc.dir[2] * 8;
+            bx = THREE.MathUtils.lerp(ex, pc.pos[0], ease(rt));
+            by = THREE.MathUtils.lerp(ey, pc.pos[1], ease(rt));
+            bz = THREE.MathUtils.lerp(ez, pc.pos[2], ease(rt));
+            sc = Math.min(1, rt * 2);
+            flap = rt < 1 ? flapFast * 0.6 : 0.14;
+          }
+        } else {
+          bs.turns[i] -= delta;
+          if (bs.turns[i] < 0) {
+            if (bs.turns[i] < -0.2) bs.turns[i] = 8 + rng() * 7;
+            else tilt = 0.3;
+          }
+          flap = 0.14 + Math.sin(bs.clock * 0.6 + pc.phase) * 0.03;
+        }
+        for (let w = 0; w < 2; w++) {
+          d.position.set(bx, by, bz);
+          d.rotation.set(tilt, pc.phase + (w ? Math.PI : 0), (w ? -1 : 1) * flap);
+          d.scale.setScalar(Math.max(0.0001, sc * 0.9));
+          d.updateMatrix();
+          perchBirds.current.setMatrixAt(i * 2 + w, d.matrix);
+        }
+      }
+      perchBirds.current.count = perch.length * 2;
+      perchBirds.current.instanceMatrix.needsUpdate = true;
+      perchBirds.current.visible = growth > 0.4;
+    }
+
     if (atEnd) return;
 
-    /* ---- fallen leaves: 2–3 detach per minute, tumble, rest (cap 60) ---- */
+    /* ---- leaf fall: detach from the outer canopy, tumble, settle flat, stay ---- */
     const fall = fallState.current;
-    const fallenBase = Math.min(60, THEMES[theme].fallenBase);
-    if (fall.rest.length > fallenBase) fall.rest.length = fallenBase;
-    while (fall.rest.length < fallenBase && fall.rest.length < tree.fallen.length) {
-      const f = tree.fallen[fall.rest.length];
-      fall.rest.push({ position: [...f.position] as Vec3, yaw: f.yaw, tint: f.tint });
-    }
-    if (p === 0 && !reduced && !preview && growth === 1 && regen.current === 1 && tree.fallTargets.length) {
-      if (!fall.fall && time.current >= fall.next) {
-        const leaf = Math.floor(rng() * tree.leaves.length);
-        const t = tree.fallTargets[Math.floor(rng() * tree.fallTargets.length)];
-        const slot = fall.rest.length < 60 ? fall.rest.length : fall.cursor++ % 60;
-        fall.fall = { leaf, target: [t[0], 0.06, t[2]], age: 0, slot };
-        fall.next = time.current + 20 + rng() * 10;
+    const REST_CAP = 80;
+    const spawnFall = () => {
+      let leaf = Math.floor(rng() * tree.leaves.length);
+      for (
+        let tries = 0;
+        tries < 8 && (tree.leaves[leaf].distance < 0.7 || fall.detached.has(leaf) || fallingByLeaf.has(leaf));
+        tries++
+      ) {
+        leaf = Math.floor(rng() * tree.leaves.length);
       }
-      if (fall.fall) {
-        fall.fall.age += delta;
-        if (fall.fall.age >= 3) {
-          const f = fall.fall;
-          fall.rest[f.slot] = { position: f.target, yaw: tree.leaves[f.leaf].yaw, tint: tree.leaves[f.leaf].tint };
-          fall.births.set(f.leaf, time.current);
-          fall.fall = null;
+      if (tree.leaves[leaf].distance < 0.7 || fall.detached.has(leaf) || fallingByLeaf.has(leaf)) return;
+      const l = tree.leaves[leaf];
+      const f: Falling = {
+        leaf,
+        x: l.position[0],
+        y: l.position[1] * growth,
+        z: l.position[2],
+        baseX: l.position[0],
+        baseZ: l.position[2],
+        phaseX: rng() * TAU,
+        phaseZ: rng() * TAU,
+        spinA: 0,
+        spinB: 0,
+        rateA: 1 + rng(),
+        rateB: 1 + rng(),
+        landed: false,
+        bounceT: 0,
+        landX: 0,
+        landZ: 0,
+        snapX: 0,
+        snapZ: 0,
+        yaw: l.yaw,
+        tint: l.tint,
+      };
+      fall.falling.push(f);
+      fallingByLeaf.set(leaf, f);
+    };
+
+    if (p === 0 && !reduced && !preview && growth === 1 && regen.current === 1 && tree.leaves.length) {
+      fall.detachTimer -= delta;
+      if (fall.detachTimer <= 0) {
+        spawnFall();
+        fall.detachTimer = 60 / Math.max(1, THEMES[theme].leafFall);
+      }
+      fall.gustTimer -= delta;
+      if (fall.gustTimer <= 0) {
+        fall.gustUntil = time.current + 1.5;
+        for (let k = 0; k < 3; k++) spawnFall();
+        fall.gustTimer = 20 + rng() * 20;
+      }
+      const gust = time.current < fall.gustUntil ? 2 : 1;
+      for (let i = fall.falling.length - 1; i >= 0; i--) {
+        const f = fall.falling[i];
+        if (!f.landed) {
+          const slow = THREE.MathUtils.clamp((f.y - 0.06) / 0.3, 0.25, 1);
+          f.y -= 0.9 * delta * slow;
+          f.x = f.baseX + Math.sin(time.current * TAU * 0.5 + f.phaseX) * 0.4 * gust;
+          f.z = f.baseZ + Math.sin(time.current * TAU * 0.5 + f.phaseZ) * 0.4 * gust;
+          f.spinA += f.rateA * delta;
+          f.spinB += f.rateB * delta;
+          if (f.y <= 0.06) {
+            f.y = 0.06;
+            f.landed = true;
+            f.bounceT = 0;
+            f.landX = f.x;
+            f.landZ = f.z;
+            let best = -1;
+            let bd = Infinity;
+            for (let m = 0; m < tree.lightModules.length; m++) {
+              const lm = tree.lightModules[m];
+              const dd = (lm[0] - f.x) ** 2 + (lm[2] - f.z) ** 2;
+              if (dd < bd) {
+                bd = dd;
+                best = m;
+              }
+            }
+            if (best >= 0 && bd > 0.36) {
+              f.snapX = tree.lightModules[best][0];
+              f.snapZ = tree.lightModules[best][2];
+            } else {
+              f.snapX = f.x;
+              f.snapZ = f.z;
+            }
+          }
+        } else {
+          f.bounceT += delta;
+          const k = clamp01(f.bounceT / 0.12);
+          f.x = THREE.MathUtils.lerp(f.landX, f.snapX, k);
+          f.z = THREE.MathUtils.lerp(f.landZ, f.snapZ, k);
+          if (f.bounceT >= 0.12) {
+            const slot = fall.rest.length < REST_CAP ? fall.rest.length : fall.cursor++ % REST_CAP;
+            fall.rest[slot] = { position: [f.snapX, 0.06, f.snapZ], yaw: f.yaw, tint: f.tint };
+            fall.detached.add(f.leaf);
+            fallingByLeaf.delete(f.leaf);
+            fall.falling.splice(i, 1);
+          }
         }
       }
     }
@@ -574,6 +757,32 @@ function LivingScene({
         const a = ease(local);
         const cluster = tree.clusters[l.cluster];
         const sway = reduced ? 0 : Math.sin(time.current * Math.PI * 2 * 0.3 + cluster.phase) * (Math.PI / 180) * (1 - a);
+
+        // Detached (now resting on the ground) — the canopy leaf is gone.
+        if (fall.detached.has(i)) {
+          d.scale.setScalar(0);
+          d.updateMatrix();
+          leaves.current.setMatrixAt(i, d.matrix);
+          continue;
+        }
+        // Currently tumbling down.
+        const ff = fallingByLeaf.get(i);
+        if (ff) {
+          d.position.set(ff.x, ff.y, ff.z);
+          if (ff.landed) {
+            const bs = 1 + 0.25 * Math.sin(clamp01(ff.bounceT / 0.12) * Math.PI);
+            d.quaternion.setFromEuler(e.set(-Math.PI / 2, 0, ff.yaw));
+            d.scale.setScalar(0.4 * bs);
+          } else {
+            d.quaternion.setFromEuler(e.set(ff.spinA, l.rotation[1], ff.spinB));
+            d.scale.setScalar(0.4);
+          }
+          d.updateMatrix();
+          leaves.current.setMatrixAt(i, d.matrix);
+          color.copy(cur.current.leaf[ff.tint]);
+          leaves.current.setColorAt(i, color);
+          continue;
+        }
 
         let rx = l.position[0];
         let ry = l.position[1];
@@ -590,22 +799,9 @@ function LivingScene({
         // sway rotates the leaf around its cluster centre in the XY plane
         const dx = rx - cluster.center[0];
         const dy = ry - cluster.center[1];
-        let x = cluster.center[0] + dx * Math.cos(sway) - dy * Math.sin(sway);
-        let y = cluster.center[1] + dx * Math.sin(sway) + dy * Math.cos(sway);
-        let z = rz;
-
-        const birth = fall.births.get(i);
-        let leafScale = birth === undefined ? 1 : THREE.MathUtils.lerp(clamp01((time.current - birth) / 0.6), 1, ease(seconds / 0.1));
-        if (birth !== undefined && time.current - birth >= 0.6) fall.births.delete(i);
-
-        if (fall.fall?.leaf === i) {
-          const f = fall.fall;
-          const t = clamp01(f.age / 3) * (1 - ease(seconds / 0.1));
-          x = THREE.MathUtils.lerp(x, f.target[0], t);
-          y = THREE.MathUtils.lerp(y, f.target[1], t);
-          z = THREE.MathUtils.lerp(z, f.target[2], t);
-          leafScale = 1;
-        }
+        const x = cluster.center[0] + dx * Math.cos(sway) - dy * Math.sin(sway);
+        const y = cluster.center[1] + dx * Math.sin(sway) + dy * Math.cos(sway);
+        const z = rz;
 
         d.position.set(
           THREE.MathUtils.lerp(x, l.col + 0.5 - model.size / 2, a),
@@ -613,12 +809,9 @@ function LivingScene({
           THREE.MathUtils.lerp(z, l.row + 0.5 - model.size / 2, a),
         );
         q.setFromEuler(e.set(l.rotation[0] + sway, l.rotation[1], l.rotation[2]));
-        if (fall.fall?.leaf === i) {
-          q.multiply(end.setFromEuler(e.set(fall.fall.age * 2, fall.fall.age, 0)));
-        }
         end.setFromEuler(e.set(-Math.PI / 2, 0, l.yaw));
         d.quaternion.copy(q).slerp(end, a);
-        d.scale.setScalar(THREE.MathUtils.lerp(0.4 * growth * leafScale * bornScale, l.tile ? 1 : 0, a));
+        d.scale.setScalar(THREE.MathUtils.lerp(0.4 * growth * bornScale, l.tile ? 1 : 0, a));
         d.updateMatrix();
         leaves.current.setMatrixAt(i, d.matrix);
 
@@ -668,15 +861,17 @@ function LivingScene({
     if (grass.current) {
       const finderFold = 1 - ease(clamp01(seconds / REVEAL_FINDER_FOLD));
       const bandFade = 1 - finish;
+      const accentColor = new THREE.Color(THEMES[theme].accent);
       tree.grass.forEach((gcard, i) => {
         const s = growth * regenE * (gcard.finder ? finderFold : bandFade);
         d.position.set(...gcard.position);
         d.rotation.set((1 - s) * (Math.PI / 2), gcard.yaw, 0);
-        d.scale.set(1, Math.max(0.0001, s), 1);
+        d.scale.set(1, Math.max(0.0001, s * (gcard.h ?? 1)), 1);
         d.updateMatrix();
         grass.current!.setMatrixAt(i, d.matrix);
         color.copy(cur.current.grass[gcard.tint]);
         if (gcard.pink && theme === "neon") color.lerp(target.pink, 0.6);
+        else if (gcard.accent) color.lerp(accentColor, 0.5);
         grass.current!.setColorAt(i, color);
       });
       grass.current.visible = growth > 0;
@@ -716,8 +911,9 @@ function LivingScene({
         <mesh ref={wood} geometry={resources.wood} material={resources.wm} />
         <instancedMesh ref={leaves} args={[resources.leaf, resources.lm, tree.leaves.length]} frustumCulled={false} />
         <instancedMesh ref={grass} args={[resources.tuft, resources.gm, tree.grass.length]} frustumCulled={false} />
-        <instancedMesh ref={fallen} args={[resources.leaf, resources.fm, 60]} frustumCulled={false} />
+        <instancedMesh ref={fallen} args={[resources.leaf, resources.fm, 90]} frustumCulled={false} />
         <instancedMesh ref={rain} args={[resources.rain, resources.rm, RAIN_MAX]} frustumCulled={false} />
+        <instancedMesh ref={perchBirds} args={[resources.bird, resources.birdMat, 10]} frustumCulled={false} />
       </group>
       <group ref={flat} visible={false}>
         <mesh geometry={resources.plate} material={resources.base} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} />

@@ -63,7 +63,7 @@ export function Editor() {
   const [busy, setBusy] = useState<null | "png" | "svg">(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  useAudioWorld(s.renderer, s.theme);
+  useAudioWorld(s.theme);
 
   useEffect(() => {
     if (!detectWebgl()) {

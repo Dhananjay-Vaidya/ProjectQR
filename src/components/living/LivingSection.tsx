@@ -20,8 +20,10 @@ import { useEditorStore } from "@/stores/editorStore";
 import RendererStage from "@/components/qr/RendererStage";
 import type { RendererHandle } from "@/components/qr/types";
 import { useAudio, useAudioWorld } from "@/hooks/useAudio";
+import { AudioControl } from "@/components/audio/AudioControl";
 import { THEME_LABEL, THEME_ORDER, type ThemeName } from "@/lib/living/themes";
 import { StudioPills } from "@/components/editor/StudioChrome";
+import { ThemeAccent } from "@/components/ui/DioramaChrome";
 import type { LeafPaletteName } from "@/lib/living/scanColors";
 import "@/components/editor/studio.css";
 import "./living.css";
@@ -66,7 +68,7 @@ export function LivingSection() {
   const s = useEditorStore();
   const rendererRef = useRef<RendererHandle | null>(null);
   const audio = useAudio();
-  useAudioWorld("living", s.theme);
+  useAudioWorld(s.theme);
 
   const [shared, setShared] = useState(false);
   useEffect(() => {
@@ -83,55 +85,39 @@ export function LivingSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw]);
 
-  // Scan mode ducks the ambient bed by 9 dB and plays a soft chime at 0.6.
-  const duckRef = useRef<number | null>(null);
+  // Scan mode ducks the ambient bed by 9 dB (restored on return) and plays a
+  // soft chime at 0.6 of the reveal.
   const scan = s.experienceView === "scan";
+  const setDucked = audio.setDucked;
   useEffect(() => {
-    if (scan) {
-      if (duckRef.current === null) {
-        duckRef.current = audio.volume;
-        audio.setVolume(audio.volume * 0.3548); // -9 dB
-      }
-      if (audio.soundEnabled) {
-        const chime = window.setTimeout(() => {
-          try {
-            const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-            const ac = new Ctx();
-            const osc = ac.createOscillator();
-            const gain = ac.createGain();
-            osc.type = "sine";
-            osc.frequency.setValueAtTime(880, ac.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1320, ac.currentTime + 0.18);
-            gain.gain.setValueAtTime(0.0001, ac.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.02);
-            gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.4);
-            osc.connect(gain).connect(ac.destination);
-            osc.start();
-            osc.stop(ac.currentTime + 0.42);
-            osc.onended = () => ac.close();
-          } catch {
-            /* no WebAudio */
-          }
-        }, 450); // 0.6 × 0.75s reveal
-        return () => window.clearTimeout(chime);
-      }
-      return;
-    }
-    if (duckRef.current !== null) {
-      audio.setVolume(duckRef.current);
-      duckRef.current = null;
-    }
-  }, [scan, audio.soundEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+    setDucked(scan);
+    return () => setDucked(false);
+  }, [scan, setDucked]);
 
-  useEffect(
-    () => () => {
-      if (duckRef.current !== null) {
-        audio.setVolume(duckRef.current);
-        duckRef.current = null;
+  useEffect(() => {
+    if (!scan || !audio.enabled) return;
+    const chime = window.setTimeout(() => {
+      try {
+        const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const ac = new Ctx();
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, ac.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1320, ac.currentTime + 0.18);
+        gain.gain.setValueAtTime(0.0001, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.4);
+        osc.connect(gain).connect(ac.destination);
+        osc.start();
+        osc.stop(ac.currentTime + 0.42);
+        osc.onended = () => ac.close();
+      } catch {
+        /* no WebAudio */
       }
-    },
-    [], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+    }, 450); // 0.6 × 0.75s reveal
+    return () => window.clearTimeout(chime);
+  }, [scan, audio.enabled]);
 
   const toggleView = () => s.setExperienceView(s.experienceView === "experience" ? "scan" : "experience");
 
@@ -156,10 +142,9 @@ export function LivingSection() {
       ? "Tap to see the tree"
       : "Tap the tree to see QR code";
 
-  const soundOn = audio.soundEnabled && audio.ambientEnabled;
-
   return (
     <main className="living-section">
+      <ThemeAccent theme={s.theme} />
       <header className="living-head">
         <Link href="/" className="living-brand lf-focus" aria-label="LinkForge home">
           <span className="living-brand__mark" aria-hidden="true">
@@ -167,17 +152,20 @@ export function LivingSection() {
           </span>
           LinkForge
         </Link>
-        <nav className="living-head__links">
-          <Link href="/create?mode=city" className="lf-focus">
-            City
-          </Link>
-          <Link href="/create?mode=particle" className="lf-focus">
-            Particles
-          </Link>
-          <Link href="/verify" className="lf-focus">
-            Verify
-          </Link>
-        </nav>
+        <div className="living-head__aside">
+          <nav className="living-head__links">
+            <Link href="/create?mode=city" className="lf-focus">
+              City
+            </Link>
+            <Link href="/create?mode=particle" className="lf-focus">
+              Particles
+            </Link>
+            <Link href="/verify" className="lf-focus">
+              Verify
+            </Link>
+          </nav>
+          <AudioControl className="living-audio" />
+        </div>
       </header>
 
       <div className="living-col">
@@ -267,19 +255,6 @@ export function LivingSection() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="living-mute lf-focus"
-            aria-pressed={soundOn}
-            aria-label={soundOn ? "Mute ambient sound" : "Unmute ambient sound"}
-            title={soundOn ? "Sound on" : "Sound off"}
-            onClick={() => audio.setSoundEnabled(!audio.soundEnabled)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-              <path d="M4 9.5h3.7L13 5v14l-5.3-4.5H4v-5Z" />
-              {soundOn ? <path d="M16 9a4 4 0 0 1 0 6M18.5 7a7 7 0 0 1 0 10" strokeLinecap="round" /> : <path d="m17 9 4 4m0-4-4 4" strokeLinecap="round" />}
-            </svg>
-          </button>
         </div>
 
         {/* The existing custom leaf-palette feature — unchanged. */}

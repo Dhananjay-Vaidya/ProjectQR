@@ -44,6 +44,10 @@ export interface GroundCard {
   finder?: boolean;
   /** Neon Bloom: this blade tuft carries a pink tip. */
   pink?: boolean;
+  /** Blade-height multiplier (base ring tapers 0.7 → 0.4 outward). */
+  h?: number;
+  /** 8% of ring blades carry a theme-accent tip. */
+  accent?: boolean;
 }
 
 export interface FoliageCluster {
@@ -65,6 +69,8 @@ export interface LivingTree {
   grass: GroundCard[];
   fallen: GroundCard[];
   fallTargets: Vec3[];
+  /** Every light, non-protected module centre — leaf-fall landing snap. */
+  lightModules: Vec3[];
   slotsPerModule: number;
   dataModuleCount: number;
   height: number;
@@ -176,15 +182,19 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   const finderDark: Vec3[] = [];
   const outerLight: Vec3[] = [];
   const nearLight: Vec3[] = [];
+  const ringLight: Vec3[] = [];
+  const lightModules: Vec3[] = [];
   for (let r = 0; r < model.size; r++) {
     for (let c = 0; c < model.size; c++) {
       const p = world(model, r, c);
       if (model.dark[r][c] && !model.protected[r][c]) modules.push({ row: r, col: c, x: p[0], z: p[2], free: 0 });
       if (model.dark[r][c] && isFinder(model.size, r, c)) finderDark.push(p);
       if (!model.dark[r][c] && !model.protected[r][c]) {
-        if (r < 2 || c < 2 || r >= model.size - 2 || c >= model.size - 2) outerLight.push(p);
+        lightModules.push(p);
         const radial = Math.hypot(p[0], p[2]);
+        if (r < 2 || c < 2 || r >= model.size - 2 || c >= model.size - 2) outerLight.push(p);
         if (radial > 1.1 && radial < 5.5) nearLight.push(p);
+        if (radial >= 1.5 && radial <= 3.5) ringLight.push(p);
       }
     }
   }
@@ -272,9 +282,9 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   const canopyRadius = maxDistance;
   leaves.forEach((l) => (l.distance /= maxDistance));
 
-  /* ---- grass: dense on the three finder areas, sparse in the outer 2-module band ---- */
+  /* ---- grass: finder tufts + sparse outer band + a dense ring around the trunk ---- */
   const grass: GroundCard[] = [];
-  const grassCap = mobile ? 210 : 430;
+  const grassCap = mobile ? 400 : 900;
   const perFinder = mobile ? 3 : 4;
   for (const p of finderDark) {
     for (let b = 0; b < perFinder && grass.length < grassCap; b++) {
@@ -287,7 +297,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
       });
     }
   }
-  const outerStride = Math.max(1, Math.floor(outerLight.length / (mobile ? 40 : 90)));
+  const outerStride = Math.max(1, Math.floor(outerLight.length / (mobile ? 30 : 70)));
   for (let i = 0; i < outerLight.length && grass.length < grassCap; i += outerStride) {
     const p = outerLight[i];
     grass.push({
@@ -295,6 +305,22 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
       yaw: decor() * TAU,
       tint: decor() < 0.5 ? 0 : 1,
     });
+  }
+  // Base ring: ~6 tufts per light module in the 1.5–3.5-module annulus, taller
+  // near the trunk (0.7) tapering to 0.4 at the ring edge.
+  const perRing = mobile ? 4 : 6;
+  for (const p of ringLight) {
+    const radial = Math.hypot(p[0], p[2]);
+    const hUnits = 0.7 - ((radial - 1.5) / 2) * 0.3; // 0.7 → 0.4
+    for (let b = 0; b < perRing && grass.length < grassCap; b++) {
+      grass.push({
+        position: [p[0] + (decor() - 0.5) * 0.8, 0.12, p[2] + (decor() - 0.5) * 0.8],
+        yaw: decor() * TAU,
+        tint: decor() < 0.5 ? 0 : 1,
+        h: hUnits / 0.5, // geometry is 0.5 tall
+        accent: decor() < 0.08,
+      });
+    }
   }
 
   /* ---- fallen leaves near the trunk (renderer caps to the theme's base count) ---- */
@@ -319,6 +345,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
     grass,
     fallen,
     fallTargets: nearLight,
+    lightModules,
     slotsPerModule: k,
     dataModuleCount: modules.length,
     height: Math.max(height, ...leaves.map((l) => l.position[1])) + 0.21,

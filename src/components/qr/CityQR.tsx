@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * CityQR — each dark module is a building footprint, each light module is
- * ground. Preview can be orbited (Explore); export is always a strict
- * orthographic top-down frame (Scan) whose silhouette is a valid QR.
+ * CityQR — the URL becomes a living model city. Dark data modules are buildings,
+ * protected modules are plain finder blocks, light modules are streets/plazas.
+ * Windows are a procedural fragment-shader grid (no geometry). Traffic, birds
+ * and a plane animate in useFrame and freeze in Scan / reduced motion.
  *
- * Performance: one InstancedMesh for all buildings. Matrices/colours are
- * rebuilt only when the model or colours change, never per frame.
+ * Export is unchanged: a strict orthographic top-down frame with buildings drawn
+ * flat in colors.foreground on the colors.background slab — the jsQR gate.
  */
 
 import {
@@ -22,130 +23,74 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import type { QRColors, QRModel } from "@/types/qr";
-import {
-  darkCells,
-  buildingHeights,
-  framedWorldSize,
-  scanOrthoHalfExtent,
-  type ModuleCell,
-} from "@/lib/renderShared";
 import { captureCanvas, type ExportedImage } from "@/lib/export";
 import type { RendererHandle, RendererProps } from "@/components/qr/types";
 import { usePrefersReducedMotion, useSceneActive } from "@/lib/hooks";
-import { THEMES, type ThemeName } from "@/lib/living/themes";
+import { detectQuality } from "@/lib/renderQuality";
+import type { ThemeName } from "@/lib/living/themes";
+import { cityTheme, type CityTheme } from "@/lib/city/cityThemes";
+import { generateCity, BUILDING_WIDTH, type CityModel } from "@/lib/city/cityGen";
+import { applyWindowShader, makeWindowUniforms } from "@/lib/city/cityWindows";
+import { birdWingGeometry, lampGeometry, planeGeometry, plazaTreeGeometry } from "@/lib/city/cityMeshes";
 
 export interface CityQRProps extends RendererProps {
   view: "explore" | "scan";
   roofDetail: boolean;
-  /** bump to replay the city-growth wave (identity is unchanged) */
   growNonce?: number;
-  /** presentation theme — recolours slab / building tones */
   theme?: ThemeName;
-  /** tap toggles Experience ⇄ Scan */
   onToggleView?: () => void;
   onWebglError?: (message: string) => void;
 }
 
-const BUILDING_WIDTH = 0.86; // fits inside the 1-unit cell, no bleed
-const WINDOW_ROWS = 4;
-
-function cityPalette(theme: ThemeName) {
-  switch (theme) {
-    case "neon":
-      return {
-        slab: "#d9dbe1",
-        road: "#eceef2",
-        tower: ["#6f7f8f", "#8292a2", "#9aa7b5"],
-        roof: "#c7ccd4",
-        glass: "#bfc9d8",
-        glow: "#c9f2ff",
-        light: "#f5dca8",
-      };
-    case "ember":
-      return {
-        slab: "#ded0bf",
-        road: "#f0e2d0",
-        tower: ["#806c5b", "#9a8370", "#b1987e"],
-        roof: "#d3b98f",
-        glass: "#e1c499",
-        glow: "#ffcf85",
-        light: "#ffe1a6",
-      };
-    case "verdant":
-    default:
-      return {
-        slab: "#d9ddcf",
-        road: "#eef1e8",
-        tower: ["#8d9b91", "#a6b0a6", "#c0c7bd"],
-        roof: "#c3d0bb",
-        glass: "#c7d9d0",
-        glow: "#f3dfa2",
-        light: "#fff0b9",
-      };
-  }
-}
-
-function cityBuildingHeight(cell: ModuleCell, baseHeight: number, worldSize: number, compact = false) {
-  if (cell.protected) return compact ? 0.62 : 0.7;
-  const distance = Math.hypot(cell.x, cell.z);
-  const centreBoost = Math.max(0, 1 - distance / (worldSize * 0.48));
-  const jitter = (((cell.row + 11) * 73856093) ^ ((cell.col + 17) * 19349663)) >>> 0;
-  const landmark = centreBoost > 0.22 && jitter % 11 === 0 ? 1.85 : jitter % 23 === 0 ? 1.35 : 1;
-  const scale = compact ? 2.35 : 2.25 + centreBoost * 5.6;
-
-  return baseHeight * scale * landmark;
-}
+const CAR_COLORS = ["#8a8f9c", "#9c8a7e", "#7e8a80", "#6f7486"];
 
 const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
-  {
-    model,
-    colors,
-    sizePx,
-    view,
-    roofDetail,
-    growNonce = 0,
-    theme = "verdant",
-    onToggleView,
-    onReady,
-    onWebglError,
-  },
-  ref
+  { model, colors, sizePx, view, roofDetail, growNonce = 0, theme = "verdant", onToggleView, onReady, onWebglError },
+  ref,
 ) {
-  const themeObj = THEMES[theme];
   const active = useSceneActive<HTMLDivElement>();
+  const quality = useMemo(() => detectQuality(), []);
+  const mobile = quality.tier === "low";
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const exportCamRef = useRef<THREE.OrthographicCamera | null>(null);
   const [exportSignal, setExportSignal] = useState(0);
   const exportResolve = useRef<((img: ExportedImage) => void) | null>(null);
 
-  const doExport = useCallback((): Promise<ExportedImage> => {
-    return new Promise((resolve) => {
-      exportResolve.current = resolve;
-      setExportSignal((n) => n + 1);
-    });
-  }, []);
+  const doExport = useCallback(
+    (): Promise<ExportedImage> =>
+      new Promise((resolve) => {
+        exportResolve.current = resolve;
+        setExportSignal((n) => n + 1);
+      }),
+    [],
+  );
 
   useImperativeHandle(
     ref,
-    (): RendererHandle => ({
-      canExport: () => Boolean(glRef.current),
-      exportImage: doExport,
-    }),
-    [doExport]
+    (): RendererHandle => ({ canExport: () => Boolean(glRef.current), exportImage: doExport }),
+    [doExport],
   );
+
+  const ct = cityTheme(theme);
+  const nightBg = view === "explore" && ct.stageBg ? ct.stageBg : null;
 
   return (
     <div
       ref={active.ref}
-      style={{ width: "100%", height: "100%", minHeight: sizePx, cursor: onToggleView ? "pointer" : "default" }}
+      style={{
+        width: "100%",
+        height: "100%",
+        minHeight: sizePx,
+        cursor: onToggleView ? "pointer" : "default",
+        background: nightBg ?? "transparent",
+        borderRadius: nightBg ? 14 : 0,
+        transition: "background 500ms ease",
+      }}
       role="img"
-      aria-label={`City voxel diorama for ${model.encodedUrl}, ${
-        view === "scan" ? "scan view" : "experience view"
-      }`}
+      aria-label={`City model for ${model.encodedUrl}, ${view === "scan" ? "scan view" : "experience view"}`}
     >
       <Canvas
-        dpr={[1, 1.5]}
+        dpr={mobile ? [1, 1] : [1, 1.5]}
         frameloop={active.active ? "always" : "demand"}
         gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
         orthographic
@@ -159,9 +104,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
           onReady?.();
         }}
         onError={() =>
-          onWebglError?.(
-            "3D rendering is unavailable on this device. Standard QR mode has been enabled."
-          )
+          onWebglError?.("3D rendering is unavailable on this device. Standard QR mode has been enabled.")
         }
         onPointerMissed={onToggleView}
       >
@@ -171,18 +114,16 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
           view={view}
           roofDetail={roofDetail}
           growNonce={growNonce}
-          slabColor={themeObj.slab}
           theme={theme}
+          mobile={mobile}
           exportSignal={exportSignal}
           onExported={() => {
             const gl = glRef.current;
             if (gl && exportResolve.current) {
-              const img = captureCanvas(gl.domElement);
-              exportResolve.current(img);
+              exportResolve.current(captureCanvas(gl.domElement));
               exportResolve.current = null;
             }
           }}
-          exportCamRef={exportCamRef}
         />
       </Canvas>
     </div>
@@ -199,235 +140,313 @@ interface SceneProps {
   view: "explore" | "scan";
   roofDetail: boolean;
   growNonce: number;
-  slabColor: string;
   theme: ThemeName;
+  mobile: boolean;
   exportSignal: number;
   onExported: () => void;
-  exportCamRef: React.RefObject<THREE.OrthographicCamera | null>;
 }
 
-/* module-level scratch for the per-frame growth wave */
-const _cityDummy = new THREE.Object3D();
+const _d = new THREE.Object3D();
+const _c = new THREE.Color();
 
-function CityScene({
-  model,
-  colors,
-  view,
-  roofDetail,
-  growNonce,
-  slabColor,
-  theme,
-  exportSignal,
-  onExported,
-  exportCamRef,
-}: SceneProps) {
+function lerpTheme(a: CityTheme, b: CityTheme, t: number) {
+  const mix = (x: string, y: string) => _c.set(x).lerp(new THREE.Color(y), t).getStyle();
+  return {
+    facades: [mix(a.facades[0], b.facades[0]), mix(a.facades[1], b.facades[1]), mix(a.facades[2], b.facades[2])] as [string, string, string],
+    roof: mix(a.roof, b.roof),
+    glass: mix(a.glass, b.glass),
+    litColors: [mix(a.litColors[0], b.litColors[0]), mix(a.litColors[1], b.litColors[1])] as [string, string],
+    litFraction: THREE.MathUtils.lerp(a.litFraction, b.litFraction, t),
+    windowEmissive: THREE.MathUtils.lerp(a.windowEmissive, b.windowEmissive, t),
+    flickerFraction: THREE.MathUtils.lerp(a.flickerFraction, b.flickerFraction, t),
+    street: mix(a.street, b.street),
+    streetDash: mix(a.streetDash, b.streetDash),
+    plaza: mix(a.plaza, b.plaza),
+    lampColor: mix(a.lampColor, b.lampColor),
+    lampLit: t < 0.5 ? a.lampLit : b.lampLit,
+    keyElevationDeg: THREE.MathUtils.lerp(a.keyElevationDeg, b.keyElevationDeg, t),
+    keyIntensity: THREE.MathUtils.lerp(a.keyIntensity, b.keyIntensity, t),
+    ambientIntensity: THREE.MathUtils.lerp(a.ambientIntensity, b.ambientIntensity, t),
+    hemiIntensity: THREE.MathUtils.lerp(a.hemiIntensity, b.hemiIntensity, t),
+    night: t < 0.5 ? a.night : b.night,
+    carHeadlights: t < 0.5 ? a.carHeadlights : b.carHeadlights,
+  };
+}
+
+function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, exportSignal, onExported }: SceneProps) {
   const { gl, scene, camera, size } = useThree();
-  const meshRef = useRef<THREE.InstancedMesh | null>(null);
-  const roofRef = useRef<THREE.InstancedMesh | null>(null);
-  const windowRef = useRef<THREE.InstancedMesh | null>(null);
-  const streetRef = useRef<THREE.InstancedMesh | null>(null);
-  const sweepRef = useRef<THREE.PointLight | null>(null);
+  const reduced = usePrefersReducedMotion();
+  const city = useMemo<CityModel>(() => generateCity(model, mobile), [model, mobile]);
+  const worldSize = city.worldSize;
+  const half = worldSize / 2 + 0.5;
 
-  const cells = useMemo(() => darkCells(model), [model]);
-  const heights = useMemo(() => buildingHeights(model), [model]);
-  const worldSize = useMemo(() => framedWorldSize(model), [model]);
-  const halfExtent = useMemo(() => scanOrthoHalfExtent(model), [model]);
-  const reducedMotion = usePrefersReducedMotion();
+  const buildings = useRef<THREE.InstancedMesh>(null);
+  const roofs = useRef<THREE.InstancedMesh>(null);
+  const antennas = useRef<THREE.InstancedMesh>(null);
+  const tanks = useRef<THREE.InstancedMesh>(null);
+  const streets = useRef<THREE.InstancedMesh>(null);
+  const trees = useRef<THREE.InstancedMesh>(null);
+  const benches = useRef<THREE.InstancedMesh>(null);
+  const lamps = useRef<THREE.InstancedMesh>(null);
+  const cars = useRef<THREE.InstancedMesh>(null);
+  const carLights = useRef<THREE.InstancedMesh>(null);
+  const birds = useRef<THREE.InstancedMesh>(null);
+  const plane = useRef<THREE.Group>(null);
+  const contrail = useRef<THREE.Points>(null);
+  const decor = useRef<THREE.Group>(null);
+  const slab = useRef<THREE.Mesh>(null);
+  const keyLight = useRef<THREE.DirectionalLight>(null);
+  const ambient = useRef<THREE.AmbientLight>(null);
+  const hemi = useRef<THREE.HemisphereLight>(null);
 
-  const fgColor = useMemo(() => new THREE.Color(colors.foreground), [colors.foreground]);
-  const bgColor = useMemo(() => new THREE.Color(colors.background), [colors.background]);
-  const city = useMemo(() => cityPalette(theme), [theme]);
-  const towerColors = useMemo(() => city.tower.map((value) => new THREE.Color(value)), [city]);
-  const roadColor = useMemo(() => new THREE.Color(city.road), [city.road]);
+  const uniforms = useMemo(() => makeWindowUniforms(), []);
+  const buildingMat = useMemo(
+    () => applyWindowShader(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 }), uniforms),
+    [uniforms],
+  );
+  const exportMat = useMemo(() => new THREE.MeshBasicMaterial({ color: colors.foreground }), [colors.foreground]);
+  const treeGeo = useMemo(() => plazaTreeGeometry(), []);
+  const lampGeo = useMemo(() => lampGeometry(cityTheme(theme).lampColor), [theme]);
+  const wingGeo = useMemo(() => birdWingGeometry(), []);
+  const planeGeo = useMemo(() => planeGeometry(), []);
+  useEffect(
+    () => () => {
+      buildingMat.dispose();
+      exportMat.dispose();
+      treeGeo.dispose();
+      lampGeo.dispose();
+      wingGeo.dispose();
+      planeGeo.dispose();
+    },
+    [buildingMat, exportMat, treeGeo, lampGeo, wingGeo, planeGeo],
+  );
 
-  /* per-building rise delay: a wave outward from the centre + a seeded jitter,
-     normalised to [0, 1]. Precomputed, never per frame. */
-  const riseDelay = useMemo(() => {
-    const n = cells.length;
-    const d = new Float32Array(n);
-    let maxDist = 0.0001;
-    for (let i = 0; i < n; i++) {
-      const dist = Math.hypot(cells[i].x, cells[i].z);
-      if (dist > maxDist) maxDist = dist;
-    }
-    for (let i = 0; i < n; i++) {
-      const dist = Math.hypot(cells[i].x, cells[i].z) / maxDist;
-      const jitter = (((i * 2654435761) >>> 0) % 1000) / 1000;
-      d[i] = THREE.MathUtils.clamp(dist * 0.7 + jitter * 0.2, 0, 0.9);
-    }
-    return d;
-  }, [cells]);
+  const roofCount = city.buildings.filter((b) => b.roof !== "none").length;
+  const antennaCount = city.buildings.filter((b) => b.antenna).length;
+  const tankCount = city.buildings.filter((b) => b.watertank).length;
+  const treeCount = city.props.filter((p) => p.kind === "tree").length;
+  const benchCount = city.props.filter((p) => p.kind === "bench").length;
+  const streetCap = Math.max(1, city.streetTiles.length * 2);
 
-  const growRef = useRef(reducedMotion ? 1 : 0);
-  const cityClockRef = useRef(0);
+  /* clocks */
+  const grow = useRef(reduced ? 1 : 0);
+  const clock = useRef(0);
+  const themeT = useRef(1);
+  const fromTheme = useRef<ThemeName>(theme);
+  const toThemeRef = useRef<ThemeName>(theme);
+  const flock = useRef({ mode: "circle" as "circle" | "away" | "back", timer: 30 + Math.random() * 40, edge: 0 });
+  const planeState = useRef({ next: city.plane.firstDelay, active: false, u: 0 });
+  const trailIdx = useRef(0);
+  const trailAge = useRef<Float32Array>(new Float32Array(40));
+  const trailPos = useMemo(() => new Float32Array(120), []);
+
   useEffect(() => {
-    growRef.current = reducedMotion ? 1 : 0;
-    cityClockRef.current = 0;
-  }, [growNonce, model.encodedUrl, reducedMotion]);
+    grow.current = reduced ? 1 : 0;
+    clock.current = 0;
+  }, [growNonce, model.encodedUrl, reduced]);
 
-  // Populate the InstancedMesh once per model/colour change.
+  // Start a 500ms colour + lit-fraction lerp whenever the theme changes.
   useEffect(() => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-    const dummy = new THREE.Object3D();
-    const tint = new THREE.Color();
-    let windowIndex = 0;
+    if (toThemeRef.current !== theme) {
+      fromTheme.current = toThemeRef.current;
+      toThemeRef.current = theme;
+      themeT.current = 0;
+    }
+  }, [theme]);
 
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells[i];
-      const h = cityBuildingHeight(cell, heights[i], worldSize);
-      // start collapsed if we're going to animate the growth wave
-      const h0 = reducedMotion ? h : 0.0001;
-      dummy.position.set(cell.x, h0 / 2, cell.z);
-      dummy.scale.set(BUILDING_WIDTH, h0, BUILDING_WIDTH);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+  /* ---- static population (geometry + base colours), once per model/theme ---- */
+  useEffect(() => {
+    const et = themeT.current * themeT.current * (3 - 2 * themeT.current);
+    const pal = lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), et);
 
-      const jitter = ((i * 2654435761) >>> 0) % 1000 / 1000;
-      tint.copy(cell.protected ? towerColors[0] : towerColors[i % towerColors.length]);
-      tint.offsetHSL(0, 0, (jitter - 0.5) * 0.08);
-      mesh.setColorAt(i, tint);
-
-      if (!cell.protected && windowRef.current && h > 1.15) {
-        const floors = Math.min(WINDOW_ROWS, Math.max(2, Math.floor(h * 1.3)));
-        for (let floor = 0; floor < floors && windowIndex < windowRef.current.count; floor++) {
-          const y = 0.36 + floor * Math.max(0.32, h / (floors + 1));
-          const side = floor % 2 === 0 ? 1 : -1;
-          dummy.position.set(cell.x + side * (BUILDING_WIDTH / 2 + 0.004), y, cell.z - 0.16);
-          dummy.rotation.set(0, Math.PI / 2, 0);
-          dummy.scale.set(0.12, 0.045, 1);
-          dummy.updateMatrix();
-          windowRef.current.setMatrixAt(windowIndex, dummy.matrix);
-          windowRef.current.setColorAt(windowIndex, new THREE.Color(floor % 3 === 0 ? city.light : city.glow));
-          windowIndex++;
-        }
+    // buildings
+    const bm = buildings.current;
+    if (bm) {
+      const seeds = new Float32Array(city.buildings.length);
+      for (let i = 0; i < city.buildings.length; i++) {
+        const b = city.buildings[i];
+        seeds[i] = b.klass === "protected" ? -1 : b.seed;
+        const h0 = reduced ? b.height : 0.0001;
+        _d.position.set(b.x, h0 / 2, b.z);
+        _d.rotation.set(0, 0, 0);
+        _d.scale.set(b.spanX, h0, b.spanZ);
+        _d.updateMatrix();
+        bm.setMatrixAt(i, _d.matrix);
+        // Scan view previews the flat verified QR: every dark module renders in
+        // colors.foreground, matching the export exactly.
+        bm.setColorAt(
+          i,
+          _c.set(view === "scan" ? colors.foreground : b.klass === "protected" ? pal.roof : pal.facades[b.toneIndex]),
+        );
       }
-    }
-    mesh.count = cells.length;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-
-    if (windowRef.current) {
-      windowRef.current.count = windowIndex;
-      windowRef.current.instanceMatrix.needsUpdate = true;
-      if (windowRef.current.instanceColor) windowRef.current.instanceColor.needsUpdate = true;
+      bm.geometry.setAttribute("aSeed", new THREE.InstancedBufferAttribute(seeds, 1));
+      bm.count = city.buildings.length;
+      bm.instanceMatrix.needsUpdate = true;
+      if (bm.instanceColor) bm.instanceColor.needsUpdate = true;
     }
 
-    const street = streetRef.current;
-    if (street) {
-      let si = 0;
-      for (let r = 0; r < model.size; r++) {
-        for (let c = 0; c < model.size; c++) {
-          if (model.dark[r][c]) continue;
-          const x = c + 0.5 - model.size / 2;
-          const z = r + 0.5 - model.size / 2;
-          dummy.position.set(x, 0.012, z);
-          dummy.rotation.set(0, 0, 0);
-          dummy.scale.set(0.92, 0.018, 0.92);
-          dummy.updateMatrix();
-          street.setMatrixAt(si, dummy.matrix);
-          street.setColorAt(si, roadColor);
-          si++;
-        }
-      }
-      street.count = si;
-      street.instanceMatrix.needsUpdate = true;
-      if (street.instanceColor) street.instanceColor.needsUpdate = true;
-    }
-
-    // Roofs: only on non-protected buildings, low-profile, inside the cell.
-    const roof = roofRef.current;
-    if (roof) {
+    // roof detail (setback / hvac / spire), all in one mesh
+    const rm = roofs.current;
+    if (rm) {
       let ri = 0;
-      for (let i = 0; i < cells.length; i++) {
-        const cell = cells[i];
-        if (cell.protected || !roofDetail) continue;
-        const h = cityBuildingHeight(cell, heights[i], worldSize);
-        dummy.position.set(cell.x, h + 0.03, cell.z);
-        dummy.scale.set(BUILDING_WIDTH * 0.66, 0.055, BUILDING_WIDTH * 0.66);
-        dummy.updateMatrix();
-        roof.setMatrixAt(ri, dummy.matrix);
-        roof.setColorAt(ri, new THREE.Color(city.roof));
-        ri++;
-      }
-      roof.count = ri;
-      roof.instanceMatrix.needsUpdate = true;
-      if (roof.instanceColor) roof.instanceColor.needsUpdate = true;
-    }
-  }, [cells, heights, model, roofDetail, reducedMotion, growNonce, worldSize, towerColors, city, roadColor]);
-
-  /* growth wave + subtle idle: buildings rise from 0 to target height with a
-     per-building delay; a point light sweeps slowly across the grid. Only the
-     buildings still rising get their matrix rewritten. */
-  const roofHidden = useRef(false);
-  useFrame((_, delta) => {
-    cityClockRef.current += delta;
-    const mesh = meshRef.current;
-    if (!mesh) return;
-
-    if (growRef.current < 1 && !reducedMotion) {
-      growRef.current = Math.min(1, growRef.current + delta / 2.4);
-      const g = growRef.current;
-      let dirty = false;
-      for (let i = 0; i < cells.length; i++) {
-        const d = riseDelay[i];
-        if (g < d) continue; // not started
-        const local = THREE.MathUtils.clamp((g - d) / 0.28, 0, 1);
-        const e = 1 - Math.pow(1 - local, 3);
-        const targetHeight = cityBuildingHeight(cells[i], heights[i], worldSize);
-        const h = Math.max(0.0001, targetHeight * e);
-        _cityDummy.position.set(cells[i].x, h / 2, cells[i].z);
-        _cityDummy.scale.set(BUILDING_WIDTH, h, BUILDING_WIDTH);
-        _cityDummy.updateMatrix();
-        mesh.setMatrixAt(i, _cityDummy.matrix);
-        dirty = true;
-      }
-      if (dirty) mesh.instanceMatrix.needsUpdate = true;
-
-      // keep roofs hidden until buildings are mostly up
-      const roof = roofRef.current;
-      if (roof) {
-        const shouldShow = g > 0.85;
-        if (shouldShow === roofHidden.current) {
-          roof.visible = shouldShow;
-          roofHidden.current = shouldShow;
+      for (const b of city.buildings) {
+        if (b.roof === "none" || b.klass === "protected") continue;
+        if (b.roof === "setback") {
+          _d.position.set(b.x, b.height + 0.11, b.z);
+          _d.scale.set(b.spanX * 0.7, 0.22, b.spanZ * 0.7);
+          _d.rotation.set(0, 0, 0);
+          _d.updateMatrix();
+          rm.setMatrixAt(ri, _d.matrix);
+          rm.setColorAt(ri++, _c.set(pal.roof));
+        } else if (b.roof === "hvac") {
+          for (let k = 0; k < 3 && ri < roofCount * 3; k++) {
+            _d.position.set(b.x + (k - 1) * 0.22, b.height + 0.07, b.z + (k % 2 ? 0.16 : -0.12));
+            _d.scale.set(0.14, 0.14, 0.14);
+            _d.rotation.set(0, 0, 0);
+            _d.updateMatrix();
+            rm.setMatrixAt(ri, _d.matrix);
+            rm.setColorAt(ri++, _c.set(pal.roof));
+          }
+        } else if (b.roof === "spire") {
+          _d.position.set(b.x, b.height + 0.2, b.z);
+          _d.scale.set(0.08, 0.4, 0.08);
+          _d.rotation.set(0, 0, 0);
+          _d.updateMatrix();
+          rm.setMatrixAt(ri, _d.matrix);
+          rm.setColorAt(ri++, _c.set(pal.roof));
         }
       }
+      rm.count = ri;
+      rm.instanceMatrix.needsUpdate = true;
+      if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
     }
 
-    // subtle idle light sweep (explore only)
-    const sweep = sweepRef.current;
-    if (sweep && view === "explore" && !reducedMotion) {
-      const a = cityClockRef.current * 0.25;
-      sweep.position.set(
-        Math.cos(a) * worldSize * 0.5,
-        worldSize * 0.35,
-        Math.sin(a) * worldSize * 0.5
-      );
+    // antennas + water tanks
+    const am = antennas.current;
+    if (am) {
+      let ai = 0;
+      for (const b of city.buildings) {
+        if (!b.antenna) continue;
+        _d.position.set(b.x + 0.2, b.height + 0.3, b.z);
+        _d.scale.set(0.03, 0.6, 0.03);
+        _d.rotation.set(0, 0, 0);
+        _d.updateMatrix();
+        am.setMatrixAt(ai, _d.matrix);
+        am.setColorAt(ai++, _c.set(pal.roof));
+      }
+      am.count = ai;
+      am.instanceMatrix.needsUpdate = true;
+      if (am.instanceColor) am.instanceColor.needsUpdate = true;
     }
-  });
-
-  useEffect(() => {
-    const roof = roofRef.current;
-    if (roof && !reducedMotion) {
-      roof.visible = false;
-      roofHidden.current = false;
-    } else if (roof) {
-      roof.visible = true;
+    const tm = tanks.current;
+    if (tm) {
+      let ti = 0;
+      for (const b of city.buildings) {
+        if (!b.watertank) continue;
+        _d.position.set(b.x - 0.18, b.height + 0.12, b.z + 0.15);
+        _d.scale.set(0.28, 0.24, 0.28);
+        _d.rotation.set(0, 0, 0);
+        _d.updateMatrix();
+        tm.setMatrixAt(ti, _d.matrix);
+        tm.setColorAt(ti++, _c.set(pal.roof));
+      }
+      tm.count = ti;
+      tm.instanceMatrix.needsUpdate = true;
+      if (tm.instanceColor) tm.instanceColor.needsUpdate = true;
     }
-  }, [reducedMotion, growNonce, roofDetail]);
 
-  useEffect(() => {
-    if (view === "scan") {
-      gl.setClearColor(bgColor, 1);
-      scene.background = bgColor;
-    } else {
-      gl.setClearColor(0x000000, 0);
-      scene.background = null;
+    // streets: lowered tile + centre dash on alternate cells
+    const sm = streets.current;
+    if (sm) {
+      let si = 0;
+      for (const s of city.streetTiles) {
+        _d.position.set(s.x, -0.03, s.z);
+        _d.scale.set(0.98, 0.04, 0.98);
+        _d.rotation.set(0, 0, 0);
+        _d.updateMatrix();
+        sm.setMatrixAt(si, _d.matrix);
+        sm.setColorAt(si++, _c.set(pal.street));
+        if (s.dash) {
+          _d.position.set(s.x, -0.005, s.z);
+          _d.scale.set(0.4, 0.02, 0.06);
+          _d.updateMatrix();
+          sm.setMatrixAt(si, _d.matrix);
+          sm.setColorAt(si++, _c.set(pal.streetDash));
+        }
+      }
+      sm.count = si;
+      sm.instanceMatrix.needsUpdate = true;
+      if (sm.instanceColor) sm.instanceColor.needsUpdate = true;
     }
-  }, [gl, scene, bgColor, view]);
 
-  // Position the live camera for Explore vs Scan.
+    // plaza props
+    const trm = trees.current;
+    if (trm) {
+      let i = 0;
+      for (const p of city.props) {
+        if (p.kind !== "tree") continue;
+        _d.position.set(p.x, 0, p.z);
+        _d.rotation.set(0, p.rot, 0);
+        _d.scale.setScalar(1);
+        _d.updateMatrix();
+        trm.setMatrixAt(i++, _d.matrix);
+      }
+      trm.count = i;
+      trm.instanceMatrix.needsUpdate = true;
+    }
+    const bem = benches.current;
+    if (bem) {
+      let i = 0;
+      for (const p of city.props) {
+        if (p.kind !== "bench") continue;
+        _d.position.set(p.x, 0.05, p.z);
+        _d.rotation.set(0, p.rot, 0);
+        _d.scale.set(0.4, 0.1, 0.15);
+        _d.updateMatrix();
+        bem.setMatrixAt(i, _d.matrix);
+        bem.setColorAt(i++, _c.set("#6E4B34"));
+      }
+      bem.count = i;
+      bem.instanceMatrix.needsUpdate = true;
+      if (bem.instanceColor) bem.instanceColor.needsUpdate = true;
+    }
+
+    // lamps
+    const lm = lamps.current;
+    if (lm) {
+      city.lamps.forEach((p, i) => {
+        _d.position.set(p.x, 0, p.z);
+        _d.rotation.set(0, 0, 0);
+        _d.scale.setScalar(1);
+        _d.updateMatrix();
+        lm.setMatrixAt(i, _d.matrix);
+      });
+      lm.count = city.lamps.length;
+      lm.instanceMatrix.needsUpdate = true;
+      const mat = lm.material as THREE.MeshStandardMaterial;
+      mat.emissive.set(pal.lampColor);
+      mat.emissiveIntensity = pal.lampLit ? 0.9 : 0;
+    }
+
+    // slab + lights
+    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(view === "scan" ? colors.background : pal.plaza);
+    if (ambient.current) ambient.current.intensity = view === "scan" ? 0.9 : pal.ambientIntensity;
+    if (hemi.current) hemi.current.intensity = view === "scan" ? 0.55 : pal.hemiIntensity;
+    if (keyLight.current) {
+      const el = (pal.keyElevationDeg * Math.PI) / 180;
+      keyLight.current.position.set(Math.cos(el) * worldSize * 0.6, Math.sin(el) * worldSize * 0.7 + 2, worldSize * 0.25);
+      keyLight.current.intensity = view === "scan" ? 0.35 : pal.keyIntensity;
+    }
+
+    uniforms.uGlass.value.set(pal.glass);
+    uniforms.uLitA.value.set(pal.litColors[0]);
+    uniforms.uLitB.value.set(pal.litColors[1]);
+    uniforms.uLitFraction.value = view === "scan" ? 0 : pal.litFraction;
+    uniforms.uEmissive.value = view === "scan" ? 0 : pal.windowEmissive;
+    uniforms.uFlicker.value = view === "scan" || reduced ? 0 : pal.flickerFraction;
+  }, [city, theme, view, roofDetail, reduced, colors.background, colors.foreground, worldSize, roofCount, uniforms]);
+
+  /* ---- camera ---- */
   useEffect(() => {
     const cam = camera as THREE.OrthographicCamera;
     const aspect = size.width / Math.max(1, size.height);
@@ -435,160 +454,342 @@ function CityScene({
       cam.position.set(0, worldSize, 0);
       cam.up.set(0, 0, -1);
       cam.lookAt(0, 0, 0);
-      cam.left = -halfExtent * aspect;
-      cam.right = halfExtent * aspect;
-      cam.top = halfExtent;
-      cam.bottom = -halfExtent;
+      cam.left = -half * aspect;
+      cam.right = half * aspect;
+      cam.top = half;
+      cam.bottom = -half;
       cam.zoom = 1;
     } else {
-      cam.position.set(worldSize * 0.72, worldSize * 0.42, worldSize * 0.84);
+      cam.position.set(worldSize * 0.72, worldSize * 0.46, worldSize * 0.84);
       cam.up.set(0, 1, 0);
       cam.lookAt(0, 0, 0);
-      cam.zoom = size.width < 760 ? 6.6 : 7.7;
+      cam.zoom = size.width < 760 ? 6.4 : 7.6;
     }
     cam.near = 0.1;
     cam.far = worldSize * 6;
     cam.updateProjectionMatrix();
-  }, [camera, view, worldSize, halfExtent, size.width, size.height]);
+  }, [camera, view, worldSize, half, size.width, size.height]);
 
-  // On an export request: render one deterministic top-down frame with a
-  // dedicated square orthographic camera, capture, then notify.
+  useEffect(() => {
+    if (decor.current) decor.current.visible = view === "explore";
+    if (roofs.current) roofs.current.visible = view === "explore" && roofDetail;
+  }, [view, roofDetail]);
+
+  useEffect(() => {
+    if (view === "scan") {
+      gl.setClearColor(new THREE.Color(colors.background), 1);
+      scene.background = new THREE.Color(colors.background);
+    } else {
+      gl.setClearColor(0x000000, 0);
+      scene.background = null;
+    }
+  }, [gl, scene, colors.background, view]);
+
+  /* ---- per-frame ---- */
+  const animate = view === "explore" && !reduced;
+  useFrame((_, deltaRaw) => {
+    const delta = Math.min(deltaRaw, 0.05);
+    clock.current += animate ? delta : 0;
+    uniforms.uTime.value = clock.current;
+
+    // growth wave
+    const bm = buildings.current;
+    if (bm && grow.current < 1) {
+      grow.current = Math.min(1, grow.current + delta / 1.8);
+      const g = grow.current;
+      for (let i = 0; i < city.buildings.length; i++) {
+        const b = city.buildings[i];
+        const dist = Math.hypot(b.x, b.z) / (worldSize * 0.55);
+        const local = THREE.MathUtils.clamp((g - dist * 0.5) / 0.4, 0, 1);
+        const h = Math.max(0.0001, b.height * (1 - (1 - local) ** 3));
+        _d.position.set(b.x, h / 2, b.z);
+        _d.scale.set(b.spanX, h, b.spanZ);
+        _d.rotation.set(0, 0, 0);
+        _d.updateMatrix();
+        bm.setMatrixAt(i, _d.matrix);
+      }
+      bm.instanceMatrix.needsUpdate = true;
+    }
+
+    // theme colour + lit-fraction lerp (500ms) — Scan renders flat foreground.
+    if (themeT.current < 1 && view !== "scan") {
+      themeT.current = Math.min(1, themeT.current + delta / 0.5);
+      const t = themeT.current * themeT.current * (3 - 2 * themeT.current);
+      const pal = lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), t);
+      for (let i = 0; i < city.buildings.length; i++) {
+        const b = city.buildings[i];
+        bm?.setColorAt(i, _c.set(b.klass === "protected" ? pal.roof : pal.facades[b.toneIndex]));
+      }
+      if (bm?.instanceColor) bm.instanceColor.needsUpdate = true;
+      uniforms.uGlass.value.set(pal.glass);
+      uniforms.uLitA.value.set(pal.litColors[0]);
+      uniforms.uLitB.value.set(pal.litColors[1]);
+      uniforms.uLitFraction.value = pal.litFraction;
+      uniforms.uEmissive.value = pal.windowEmissive;
+      uniforms.uFlicker.value = reduced ? 0 : pal.flickerFraction;
+      if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(pal.plaza);
+      const lm = lamps.current;
+      if (lm) {
+        const mat = lm.material as THREE.MeshStandardMaterial;
+        mat.emissive.set(pal.lampColor);
+        mat.emissiveIntensity = pal.lampLit ? 0.9 : 0;
+      }
+      if (keyLight.current) keyLight.current.intensity = pal.keyIntensity;
+    }
+
+    const ct = cityTheme(theme);
+
+    // traffic
+    const carM = cars.current;
+    const lightM = carLights.current;
+    if (carM && city.cars.length && city.runs.length) {
+      for (let i = 0; i < city.cars.length; i++) {
+        const car = city.cars[i];
+        const run = city.runs[car.run % city.runs.length];
+        if (animate) {
+          car.t += (car.dir * car.speed * delta) / Math.max(1, run.length);
+          if (car.t <= 0) { car.t = 0; car.dir = 1; }
+          else if (car.t >= 1) { car.t = 1; car.dir = -1; }
+        }
+        const x = THREE.MathUtils.lerp(run.ax, run.bx, car.t);
+        const z = THREE.MathUtils.lerp(run.az, run.bz, car.t);
+        const hz = run.axis === "h";
+        _d.position.set(x + (hz ? 0 : car.lane), 0.09, z + (hz ? car.lane : 0));
+        _d.rotation.set(0, hz ? (car.dir > 0 ? 0 : Math.PI) : car.dir > 0 ? Math.PI / 2 : -Math.PI / 2, 0);
+        _d.scale.set(0.35, 0.15, 0.18);
+        _d.updateMatrix();
+        carM.setMatrixAt(i, _d.matrix);
+        carM.setColorAt(i, _c.set(CAR_COLORS[car.color]));
+        if (lightM) {
+          for (let k = 0; k < 2; k++) {
+            const fx = hz ? car.dir * 0.18 : 0;
+            const fz = hz ? 0 : car.dir * 0.18;
+            _d.position.set(x + (hz ? 0 : car.lane) + fx, 0.1, z + (hz ? car.lane : 0) + fz + (k ? 0.05 : -0.05) * (hz ? 1 : 0));
+            _d.scale.setScalar(0.04);
+            _d.rotation.set(0, 0, 0);
+            _d.updateMatrix();
+            lightM.setMatrixAt(i * 2 + k, _d.matrix);
+          }
+        }
+      }
+      carM.instanceMatrix.needsUpdate = true;
+      if (carM.instanceColor) carM.instanceColor.needsUpdate = true;
+      if (lightM) {
+        lightM.instanceMatrix.needsUpdate = true;
+        lightM.visible = ct.carHeadlights && view === "explore";
+      }
+    }
+
+    // birds — loose V circling the city
+    const bd = birds.current;
+    if (bd) {
+      const f = flock.current;
+      if (animate) {
+        f.timer -= delta;
+        if (f.mode === "circle" && f.timer <= 0) { f.mode = "away"; f.timer = 12; f.edge = Math.floor(Math.random() * 4); }
+        else if (f.mode === "away" && f.timer <= 0) { f.mode = "back"; f.timer = 6; f.edge = Math.floor(Math.random() * 4); }
+        else if (f.mode === "back" && f.timer <= 0) { f.mode = "circle"; f.timer = 90 + Math.random() * 60; }
+      }
+      const lap = (clock.current * (Math.PI * 2)) / city.birds.lapSeconds;
+      let cx = Math.cos(lap) * city.birds.radius;
+      let cz = Math.sin(lap) * city.birds.radius;
+      let cy = city.birds.altitude + Math.sin(clock.current * 0.2) * 0.4;
+      if (f.mode !== "circle") {
+        const ex = [1, -1, 0, 0][f.edge] * worldSize;
+        const ez = [0, 0, 1, -1][f.edge] * worldSize;
+        const away = f.mode === "away" ? 1 - f.timer / 12 : f.timer / 6;
+        cx = THREE.MathUtils.lerp(cx, ex, away);
+        cz = THREE.MathUtils.lerp(cz, ez, away);
+        cy += away * 2;
+      }
+      const head = Math.atan2(-Math.sin(lap), Math.cos(lap));
+      for (let i = 0; i < city.birds.count; i++) {
+        const rank = Math.floor(i / 2) + 1;
+        const sideSign = i % 2 ? 1 : -1;
+        const bx = -rank * 0.35;
+        const bz = sideSign * rank * 0.32;
+        const px = cx + Math.cos(head) * bx - Math.sin(head) * bz;
+        const pz = cz + Math.sin(head) * bx + Math.cos(head) * bz;
+        const flap = animate ? Math.sin(clock.current * Math.PI * 2 * 4 + city.birds.phases[i]) * (35 * Math.PI) / 180 : 0.1;
+        for (let w = 0; w < 2; w++) {
+          _d.position.set(px, cy, pz);
+          _d.rotation.set(0, head + (w ? Math.PI : 0), (w ? -1 : 1) * flap);
+          _d.scale.setScalar(f.mode === "circle" ? 1 : Math.max(0.001, f.mode === "away" ? 1 - (1 - f.timer / 12) : f.timer / 6));
+          _d.updateMatrix();
+          bd.setMatrixAt(i * 2 + w, _d.matrix);
+        }
+      }
+      bd.instanceMatrix.needsUpdate = true;
+      bd.count = city.birds.count * 2;
+    }
+
+    // plane + contrail
+    const pg = plane.current;
+    if (pg) {
+      const ps = planeState.current;
+      if (animate) {
+        if (!ps.active) {
+          ps.next -= delta;
+          if (ps.next <= 0) { ps.active = true; ps.u = 0; }
+        } else {
+          ps.u += (city.plane.speed * delta) / (worldSize * 2.4);
+          if (ps.u >= 1) { ps.active = false; ps.next = 75 + Math.random() * 45; }
+        }
+      }
+      pg.visible = ps.active || !animate;
+      const a = city.plane.angle;
+      const travel = (ps.active ? ps.u : 0.5) * worldSize * 2.4 - worldSize * 1.2;
+      pg.position.set(Math.cos(a) * travel, city.plane.altitude, Math.sin(a) * travel);
+      pg.rotation.set(0, -a, 0);
+      const tr = contrail.current;
+      if (tr) {
+        const pos = tr.geometry.attributes.position as THREE.BufferAttribute;
+        if (animate && ps.active) {
+          trailAge.current[trailIdx.current] = 0;
+          pos.setXYZ(trailIdx.current, pg.position.x, pg.position.y, pg.position.z);
+          trailIdx.current = (trailIdx.current + 1) % 40;
+        }
+        for (let i = 0; i < 40; i++) trailAge.current[i] += delta;
+        pos.needsUpdate = true;
+        (tr.material as THREE.PointsMaterial).opacity = ps.active ? 0.5 : 0;
+        tr.visible = view === "explore";
+      }
+      // night blink
+      const blink = pg.children[1] as THREE.Mesh | undefined;
+      if (blink) blink.visible = ct.night && Math.sin(clock.current * Math.PI) > 0;
+    }
+  });
+
+  /* ---- export: deterministic flat top-down frame ---- */
   useEffect(() => {
     if (exportSignal === 0) return;
+    const bm = buildings.current;
+    if (!bm) return;
 
-    // Force the growth wave to completion so the export silhouette reflects the
-    // real building heights, not a mid-animation frame.
-    const mesh = meshRef.current;
-    if (mesh) {
-      growRef.current = 1;
-      for (let i = 0; i < cells.length; i++) {
-        const h = cityBuildingHeight(cells[i], heights[i], worldSize, true);
-        _cityDummy.position.set(cells[i].x, h / 2, cells[i].z);
-        _cityDummy.scale.set(BUILDING_WIDTH, h, BUILDING_WIDTH);
-        _cityDummy.updateMatrix();
-        mesh.setMatrixAt(i, _cityDummy.matrix);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
+    grow.current = 1;
+    for (let i = 0; i < city.buildings.length; i++) {
+      const b = city.buildings[i];
+      _d.position.set(b.x, b.height / 2, b.z);
+      _d.scale.set(b.spanX, b.height, b.spanZ);
+      _d.rotation.set(0, 0, 0);
+      _d.updateMatrix();
+      bm.setMatrixAt(i, _d.matrix);
     }
-    if (roofRef.current) roofRef.current.visible = roofDetail;
+    bm.instanceMatrix.needsUpdate = true;
 
-    const EXPORT_PX = 900;
+    const prevMat = bm.material;
+    const prevDecor = decor.current?.visible ?? true;
+    const prevRoofs = roofs.current?.visible ?? true;
+    bm.material = exportMat;
+    uniforms.uExport.value = 1;
+    if (decor.current) decor.current.visible = false;
+    if (roofs.current) roofs.current.visible = false;
+
     const prevSize = new THREE.Vector2();
     gl.getSize(prevSize);
-    const prevPixelRatio = gl.getPixelRatio();
-    const prevAutoClear = gl.autoClear;
-    const prevMaterialColor =
-      mesh?.material instanceof THREE.MeshBasicMaterial
-        ? mesh.material.color.clone()
-        : null;
+    const prevRatio = gl.getPixelRatio();
+    const prevAuto = gl.autoClear;
+    const EXPORT_PX = 900;
 
-    const cam = new THREE.OrthographicCamera(
-      -halfExtent,
-      halfExtent,
-      halfExtent,
-      -halfExtent,
-      0.1,
-      worldSize * 6
-    );
+    const cam = new THREE.OrthographicCamera(-half, half, half, -half, 0.1, worldSize * 6);
     cam.position.set(0, worldSize, 0);
     cam.up.set(0, 0, -1);
     cam.lookAt(0, 0, 0);
     cam.updateProjectionMatrix();
-    exportCamRef.current = cam;
 
     gl.setPixelRatio(1);
     gl.setSize(EXPORT_PX, EXPORT_PX, false);
-    gl.setClearColor(bgColor, 1);
-    if (mesh?.material instanceof THREE.MeshBasicMaterial) {
-      mesh.material.color.copy(fgColor);
-    }
+    gl.setClearColor(new THREE.Color(colors.background), 1);
     gl.autoClear = true;
+    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(colors.background);
     gl.render(scene, cam);
-
     onExported();
 
-    // Restore the interactive view.
-    gl.setPixelRatio(prevPixelRatio);
+    gl.setPixelRatio(prevRatio);
     gl.setSize(prevSize.x, prevSize.y, false);
-    gl.autoClear = prevAutoClear;
-    if (prevMaterialColor && mesh?.material instanceof THREE.MeshBasicMaterial) {
-      mesh.material.color.copy(prevMaterialColor);
-    }
+    gl.autoClear = prevAuto;
+    bm.material = prevMat;
+    uniforms.uExport.value = 0;
+    if (decor.current) decor.current.visible = prevDecor;
+    if (roofs.current) roofs.current.visible = prevRoofs;
+    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(view === "scan" ? colors.background : cityTheme(theme).plaza);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportSignal]);
 
+  const B = BUILDING_WIDTH;
   return (
     <>
-      <ambientLight intensity={view === "scan" ? 0.9 : 2.1} />
-      <hemisphereLight args={[0xffffff, 0xd9ded1, view === "scan" ? 0.55 : 1.35]} />
-      <directionalLight position={[10, 28, 12]} intensity={view === "scan" ? 0.35 : 1.15} castShadow={false} />
-      {/* slow idle light sweep — subtle, explore only (moved in useFrame) */}
-      <pointLight
-        ref={sweepRef}
-        position={[worldSize * 0.5, worldSize * 0.35, 0]}
-        intensity={view === "explore" && !reducedMotion ? 0.5 : 0}
-        distance={worldSize * 2}
-        decay={2}
-        color={"#4fd1c5"}
-      />
+      <ambientLight ref={ambient} intensity={1.8} />
+      <hemisphereLight ref={hemi} args={[0xffffff, 0xd9ded1, 1.2]} />
+      <directionalLight ref={keyLight} position={[10, 24, 8]} intensity={1.1} />
 
-      {/* Ground slab — themed, matte. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+      <mesh ref={slab} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
         <planeGeometry args={[worldSize, worldSize]} />
-        <meshStandardMaterial
-          color={view === "scan" ? bgColor : new THREE.Color(city.slab ?? slabColor)}
-          roughness={0.95}
-          metalness={0}
-        />
+        <meshStandardMaterial color="#ece7db" roughness={0.96} metalness={0} />
       </mesh>
 
-      {view === "explore" && (
-        <instancedMesh
-          ref={streetRef}
-          args={[undefined, undefined, Math.max(1, model.size * model.size)]}
-          frustumCulled={false}
-        >
+      <instancedMesh ref={buildings} args={[undefined, undefined, Math.max(1, city.buildings.length)]} frustumCulled={false} material={buildingMat}>
+        <boxGeometry args={[1, 1, 1]} />
+      </instancedMesh>
+
+      <instancedMesh ref={roofs} args={[undefined, undefined, Math.max(1, roofCount * 3)]} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial vertexColors roughness={0.9} metalness={0} />
+      </instancedMesh>
+
+      <group ref={decor}>
+        <instancedMesh ref={antennas} args={[undefined, undefined, Math.max(1, antennaCount)]} frustumCulled={false}>
           <boxGeometry args={[1, 1, 1]} />
-          <meshLambertMaterial vertexColors />
+          <meshStandardMaterial vertexColors roughness={0.8} />
         </instancedMesh>
-      )}
-
-      <instancedMesh
-        ref={meshRef}
-        args={[undefined, undefined, Math.max(1, cells.length)]}
-        frustumCulled={false}
-      >
-        <boxGeometry args={[1, 1, 1]} />
-        <meshBasicMaterial color={view === "scan" ? colors.foreground : city.tower[1]} />
-      </instancedMesh>
-
-      <instancedMesh
-        ref={roofRef}
-        args={[undefined, undefined, Math.max(1, cells.length)]}
-        frustumCulled={false}
-      >
-        <boxGeometry args={[1, 1, 1]} />
-        <meshLambertMaterial vertexColors />
-      </instancedMesh>
-
-      {view === "explore" && (
-        <instancedMesh
-          ref={windowRef}
-          args={[undefined, undefined, Math.max(1, cells.length * WINDOW_ROWS)]}
-          frustumCulled={false}
-        >
-          <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial vertexColors transparent opacity={0.68} side={THREE.DoubleSide} toneMapped={false} />
+        <instancedMesh ref={tanks} args={[undefined, undefined, Math.max(1, tankCount)]} frustumCulled={false}>
+          <cylinderGeometry args={[0.5, 0.5, 1, 10]} />
+          <meshStandardMaterial vertexColors roughness={0.85} />
         </instancedMesh>
-      )}
+        <instancedMesh ref={streets} args={[undefined, undefined, streetCap]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial vertexColors roughness={1} metalness={0} />
+        </instancedMesh>
+        <instancedMesh ref={trees} args={[treeGeo, undefined, Math.max(1, treeCount)]} frustumCulled={false}>
+          <meshStandardMaterial vertexColors roughness={0.9} />
+        </instancedMesh>
+        <instancedMesh ref={benches} args={[undefined, undefined, Math.max(1, benchCount)]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial vertexColors roughness={0.9} />
+        </instancedMesh>
+        <instancedMesh ref={lamps} args={[lampGeo, undefined, Math.max(1, city.lamps.length)]} frustumCulled={false}>
+          <meshStandardMaterial vertexColors roughness={0.7} emissive="#000000" />
+        </instancedMesh>
+        <instancedMesh ref={cars} args={[undefined, undefined, Math.max(1, city.cars.length)]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial vertexColors roughness={0.6} />
+        </instancedMesh>
+        <instancedMesh ref={carLights} args={[undefined, undefined, Math.max(2, city.cars.length * 2)]} frustumCulled={false}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshBasicMaterial color="#fff2c2" toneMapped={false} />
+        </instancedMesh>
+        <instancedMesh ref={birds} args={[wingGeo, undefined, Math.max(2, city.birds.count * 2)]} frustumCulled={false}>
+          <meshBasicMaterial color="#23273a" side={THREE.DoubleSide} toneMapped={false} />
+        </instancedMesh>
+        <group ref={plane}>
+          <mesh geometry={planeGeo}>
+            <meshStandardMaterial color="#c9ccd2" roughness={0.7} />
+          </mesh>
+          <mesh position={[-0.24, 0, 0]}>
+            <sphereGeometry args={[0.025, 6, 6]} />
+            <meshBasicMaterial color="#ff3b3b" toneMapped={false} />
+          </mesh>
+        </group>
+        <points ref={contrail}>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" args={[trailPos, 3]} />
+          </bufferGeometry>
+          <pointsMaterial size={0.14} color="#ffffff" transparent opacity={0} sizeAttenuation depthWrite={false} />
+        </points>
+      </group>
 
-      {view === "explore" && !reducedMotion && (
-        <OrbitControls
-          enablePan={false}
-          minPolarAngle={0.15}
-          maxPolarAngle={Math.PI / 2.2}
-          enableDamping
-        />
+      {B > 0 && view === "explore" && !reduced && (
+        <OrbitControls enablePan={false} minPolarAngle={0.15} maxPolarAngle={Math.PI / 2.2} enableDamping />
       )}
     </>
   );

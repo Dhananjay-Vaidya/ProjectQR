@@ -88,10 +88,7 @@
 .studio-pills--segmented .studio-pill__active { background: linear-gradient(180deg,#3f704f,#285639); border-color: #285639; box-shadow: 0 10px 26px #244b3330, inset 0 1px 1px #c8e2c845; }
 .studio-pills--segmented .studio-pill[aria-pressed="true"] { color: #fff; }
 .studio-controls__themes { display: flex; align-items: center; gap: 10px; }
-.lf-studio .lf-audio-toggle { width: 42px; height: 42px; border-color: #ffffffd6; background: linear-gradient(180deg,#ffffff9c,#edf1e997); box-shadow: 0 8px 24px #35472f14, inset 0 1px 0 #fff; color: var(--studio-ink); flex: 0 0 auto; transition: background 220ms, border-color 220ms, box-shadow 220ms, transform 220ms, color 220ms; }
-.lf-studio .lf-audio-toggle:hover { border-color: #7f9b7775; background: #ffffffe0; box-shadow: 0 10px 26px #35472f1c, inset 0 1px 0 #fff; transform: translateY(-2px); }
-.lf-studio .lf-audio-toggle[aria-pressed="true"] { color: #fff; border-color: #315c3f; background: linear-gradient(180deg,#3f704f,#285639); box-shadow: 0 12px 28px #244b3333, inset 0 1px 1px #d7f0c740; }
-.lf-studio .lf-audio-toggle:active { transform: translateY(0) scale(.98); }
+.lf-studio .lf-sound-btn { flex: 0 0 auto; color: var(--studio-ink); }
 .studio-panel { align-self: start; margin-top: 45px; position: relative; z-index: 4; padding: 27px; border: 1px solid #ffffffb0; border-radius: 23px; background: linear-gradient(140deg,#ffffffa3,#f8f7f18c); box-shadow: 0 18px 60px #39432f12, inset 0 1px 0 #fff9; backdrop-filter: blur(16px); min-width: 0; overflow: hidden; }
 .studio-panel__section { border-bottom: 1px solid var(--studio-line); padding-bottom: 25px; margin-bottom: 23px; display: grid; gap: 14px; }
 .studio-panel__section:last-child { border: 0; padding: 0; margin: 0; }

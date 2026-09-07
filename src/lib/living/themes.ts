@@ -34,6 +34,8 @@ export interface DioramaTheme {
   pinkTips: number;
   /** Baseline count of resting fallen leaves near the trunk. */
   fallenBase: number;
+  /** Leaves that detach and tumble per minute. */
+  leafFall: number;
 }
 
 export const THEMES: Record<ThemeName, DioramaTheme> = {
@@ -50,6 +52,7 @@ export const THEMES: Record<ThemeName, DioramaTheme> = {
     rain: null,
     pinkTips: 0.15,
     fallenBase: 34,
+    leafFall: 4,
   },
   verdant: {
     stage: "#F6F1E7",
@@ -64,6 +67,7 @@ export const THEMES: Record<ThemeName, DioramaTheme> = {
     rain: null,
     pinkTips: 0,
     fallenBase: 34,
+    leafFall: 4,
   },
   ember: {
     stage: "#F6F1E7",
@@ -78,6 +82,7 @@ export const THEMES: Record<ThemeName, DioramaTheme> = {
     rain: { desktop: 400, mobile: 160 },
     pinkTips: 0,
     fallenBase: 60,
+    leafFall: 12,
   },
 };
 
