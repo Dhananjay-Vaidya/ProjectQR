@@ -1,7 +1,7 @@
 ﻿"use client";
 
 /**
- * Editor â€” the display-case workspace.
+ * Editor - the display-case workspace.
  *
  * Desktop: preview 68% / panel 32%. Mobile: stacked, preview full width 400px.
  * The diorama sits on the page's sky gradient with its caption plate; two rows
@@ -94,7 +94,7 @@ export function Editor() {
     const modeLabel =
       MODES.find((m) => m.id === s.renderer)?.label ??
       (s.renderer === "standard" ? "Standard" : "Mosaic");
-    return `${modeLabel}, ${THEME_LABEL[s.theme]} theme, ${s.model.size}Ã—${s.model.size}`;
+    return `${modeLabel}, ${THEME_LABEL[s.theme]} theme, ${s.model.size}x${s.model.size}`;
   }, [s.model, s.renderer, s.theme]);
 
   const exportPng = useCallback(async () => {
@@ -106,7 +106,7 @@ export function Editor() {
     }
     if (s.renderer === "particle" && s.particle.state !== "assembled") {
       s.setParticle({ state: "assembled" });
-      setNotice("Assembling the particles â€” press Download again shortly.");
+      setNotice("Assembling the particles - press Download again shortly.");
       return;
     }
     setBusy("png");
@@ -138,7 +138,7 @@ export function Editor() {
         rounded: s.standardRounded,
       });
       downloadSvg(svg, `${exportStem(s.model)}.svg`);
-      setNotice("SVG downloaded. It mirrors the Standard matrix â€” check the PNG for scan confidence.");
+      setNotice("SVG downloaded. It mirrors the Standard matrix - check the PNG for scan confidence.");
     } finally {
       setBusy(null);
     }
@@ -147,7 +147,7 @@ export function Editor() {
   const scanSentence = s.lastVerification
     ? s.lastVerification.ok
       ? "Scans correctly."
-      : "Doesn't scan yet â€” increase contrast or enable safe mode."
+      : "Doesn't scan yet - increase contrast or enable safe mode."
     : "Every download is decoded and checked against your link first.";
 
   const themeDots: Record<ThemeName, string> = { neon: "#b1a8c8", verdant: "#99b77c", ember: "#c49965" };
@@ -180,7 +180,7 @@ export function Editor() {
           <motion.div className="studio-intro" initial={enter} animate={{ opacity: 1, y: 0 }} transition={{ duration: .65, delay: .05 }}>
             <p className="studio-eyebrow">Create</p>
             <h1 className="studio-title" id="studio-title">Bring your<br/>link to <em>life.</em></h1>
-            <p className="studio-intro__copy">Turn any URL into a unique 3D experience thatâ€™s beautiful, shareable, and scannable.</p>
+            <p className="studio-intro__copy">Turn any URL into a unique 3D experience that&apos;s beautiful, shareable, and scannable.</p>
             <FeatureStrip />
           </motion.div>
 
@@ -192,7 +192,7 @@ export function Editor() {
             <div className="studio-stage__canvas" data-flat={!isDiorama}>
               {s.model ? <RendererStage
                 ref={rendererRef}
-                mode={s.renderer} model={s.model} colors={s.colors} sizePx={480}
+                mode={s.renderer} model={s.model} colors={s.colors} sizePx={isDiorama ? 480 : 380}
                 theme={s.theme} experienceView={s.experienceView} buildNonce={s.buildNonce}
                 leafPalette={s.living.leafPalette}
                 customLeafColors={s.living.customLeafColors}
@@ -270,13 +270,13 @@ export function Editor() {
             </div>}
             {s.renderer === "particle" && <div className="studio-particle-look">
               <StudioPills label="Particle formation" value={s.particle.state} options={[{ value: "scattered", label: "Scattered" }, { value: "assembled", label: "Assembled" }]} onChange={state => changeView(state === "assembled" ? "scan" : "experience")} segmented/>
-              <label className="studio-label">Particles Â· {s.particle.particleCount.toLocaleString()}
+              <label className="studio-label">Particles · {s.particle.particleCount.toLocaleString()}
                 <input className="lf-range" type="range" min={2000} max={9000} step={500} value={s.particle.particleCount} onChange={e => s.setParticle({ particleCount: Number(e.target.value) })}/>
               </label>
             </div>}
             {s.renderer === "mosaic" && <label className="studio-checkfield"><input type="checkbox" checked={s.mosaic.safeMode} onChange={e => s.setMosaic({ safeMode: e.target.checked })}/>Safe mode (solid module cores)</label>}
             {s.renderer === "standard" && <label className="studio-checkfield"><input type="checkbox" checked={s.standardRounded} onChange={e => s.setStandardRounded(e.target.checked)}/>Rounded data modules</label>}
-            <p className="studio-help">The theme refines colours only â€” the worldâ€™s shape comes from your link.</p>
+            <p className="studio-help">The theme refines colours only - the world&apos;s shape comes from your link.</p>
             {s.webglNotice && <p className="studio-help" role="status">{s.webglNotice}</p>}
           </section>
 
@@ -289,7 +289,7 @@ export function Editor() {
             </label>
             <motion.button type="button" className="studio-download lf-focus" onClick={exportPng} disabled={!s.model || busy !== null}
               whileHover={interaction} whileTap={reduced ? undefined : { scale: .98 }}>
-              <StudioIcon name="download"/>{busy === "png" ? "Checkingâ€¦" : "Download PNG"}
+              <StudioIcon name="download"/>{busy === "png" ? "Checking..." : "Download PNG"}
             </motion.button>
             {s.renderer === "standard" && <button type="button" className="studio-tertiary lf-focus" onClick={exportSvgFile} disabled={!s.model || busy !== null}>Download SVG</button>}
             <div className="studio-verification" data-failed={s.lastVerification && !s.lastVerification.ok}>
@@ -302,7 +302,7 @@ export function Editor() {
       </div>
       <div className="studio-mobile-features"><FeatureStrip mobile/></div>
       <footer className="studio-footer">
-        <span className="studio-footer__note">Made from your link.<span>Â·</span>Made to be shared.</span>
+        <span className="studio-footer__note">Made from your link.<span>·</span>Made to be shared.</span>
         <p className="studio-footer__quote">A simple link.<br/>A living world.</p>
       </footer>
     </main>

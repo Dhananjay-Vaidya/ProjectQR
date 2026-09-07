@@ -52,7 +52,7 @@ export function AudioControl({ className = "" }: { className?: string }) {
 
           <div className="lf-audio-actions">
             <button type="button" className="lf-audio-mini lf-focus" onClick={audio.previousTrack} aria-label="Previous track">Previous</button>
-            <button type="button" className="lf-audio-mini lf-focus" onClick={audio.soundEnabled ? audio.pause : audio.play} aria-label={audio.soundEnabled ? "Pause background sound" : "Play background sound"}>{audio.soundEnabled ? "Pause" : "Play"}</button>
+            <button type="button" className="lf-audio-mini lf-focus" onClick={audio.playing ? audio.pause : audio.play} aria-label={audio.playing ? "Pause background sound" : "Play background sound"}>{audio.playing ? "Pause" : "Play"}</button>
             <button type="button" className="lf-audio-mini lf-focus" onClick={audio.nextTrack} aria-label="Next track">Next</button>
           </div>
 

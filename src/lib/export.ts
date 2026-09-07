@@ -15,14 +15,18 @@ import {
   type RasterImage,
 } from "@/types/qr";
 import { framedSize } from "@/lib/qr";
-import { isFinder, type LivingScanColors } from "@/lib/living/scanColors";
+import { isFinder, scanModuleIsB, type LivingScanColors } from "@/lib/living/scanColors";
 
 /** Options shared by every raster export. */
 export interface RasterExportOptions {
   /** Target on-screen size of the *matrix* (excluding quiet zone), in CSS px. */
   matrixPx: number;
   colors: QRColors;
-  /** Living only: geometry and quiet-zone rules are unchanged. */
+  /**
+   * Living only: the verified four-colour scan scheme ({ darkA, darkB, finder,
+   * light }). Geometry and quiet-zone rules are unchanged — only fill colours
+   * differ. Data-dark modules alternate darkA/darkB by seeded noise.
+   */
   scanColors?: LivingScanColors;
   /** Device pixel ratio to bake in. Clamped to [1, 3]. */
   pixelRatio?: number;
@@ -87,11 +91,18 @@ export function rasterizeStandard(
   // Dark modules, offset by the quiet zone.
   ctx.fillStyle = opts.colors.foreground;
   const offset = QUIET_ZONE_MODULES * modulePx;
+  const sc = opts.scanColors;
   for (let r = 0; r < model.size; r++) {
     for (let c = 0; c < model.size; c++) {
       if (model.dark[r][c]) {
-        ctx.fillStyle = opts.scanColors
-          ? isFinder(model.size, r, c) ? opts.scanColors.finder : opts.scanColors.dark
+        ctx.fillStyle = sc
+          ? isFinder(model.size, r, c)
+            ? sc.finder
+            : model.protected[r][c]
+              ? sc.darkA
+              : scanModuleIsB(model, r, c)
+                ? sc.darkB
+                : sc.darkA
           : opts.colors.foreground;
         ctx.fillRect(offset + c * modulePx, offset + r * modulePx, modulePx, modulePx);
       }

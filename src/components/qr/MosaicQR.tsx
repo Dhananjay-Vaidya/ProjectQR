@@ -65,7 +65,7 @@ const MosaicQR = forwardRef<RendererHandle, MosaicQRProps>(function MosaicQR(
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const modulePx = Math.max(2, Math.round((sizePx / model.size) * ratio));
+    const modulePx = Math.max(2, Math.floor((sizePx / framedModules) * ratio));
     drawMosaic(canvas, model, colors, modulePx, imgEl, safeMode);
     canvas.style.width = `${((modulePx * framedModules) / ratio).toFixed(1)}px`;
     canvas.style.height = `${((modulePx * framedModules) / ratio).toFixed(1)}px`;

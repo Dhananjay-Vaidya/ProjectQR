@@ -24,45 +24,60 @@ export interface DioramaTheme {
   leaves: [string, string, string];
   /** Rare accent voxel colour. */
   accent: string;
-  /** Two ground-decor (grass) tones. */
+  /** Two ground-decor (grass) tones — [tip/light, blade/dark]. */
   grass: [string, string];
   /** Emissive decoration colour (theme "neon" / "ember" ambient particles). */
   shard: string;
+  /** Ember-style vertical rain. `null` = no rain for this theme. */
+  rain: { desktop: number; mobile: number } | null;
+  /** Fraction of grass blades that get a coloured tip (Neon Bloom pink). */
+  pinkTips: number;
+  /** Baseline count of resting fallen leaves near the trunk. */
+  fallenBase: number;
 }
 
 export const THEMES: Record<ThemeName, DioramaTheme> = {
   neon: {
-    stage: "#F4F1F7",
-    slab: "#DAD5E2",
-    light: "#F9F7FC",
+    stage: "#F6F1E7",
+    slab: "#CFC7B9",
+    light: "#F7F3EA",
     dark: "#4C4A66",
-    wood: "#5B5470",
-    leaves: ["#8FE3F5", "#B79CFF", "#F6A5E1"],
-    accent: "#FFD1F0",
-    grass: ["#C9C4E8", "#B4AEDC"],
+    wood: "#6E4B34",
+    leaves: ["#FFD1E8", "#F7A8CF", "#E07FB4"],
+    accent: "#E07FB4",
+    grass: ["#7FD24A", "#5FB43A"],
     shard: "#FFFFFF",
+    rain: null,
+    pinkTips: 0.15,
+    fallenBase: 34,
   },
   verdant: {
-    stage: "#F5F0E6",
-    slab: "#D8CFC0",
+    stage: "#F6F1E7",
+    slab: "#CFC7B9",
     light: "#F7F3EA",
     dark: "#3B4A3E",
-    wood: "#7A5A3C",
-    leaves: ["#1F7A4D", "#2E9E62", "#9BE05A"],
-    accent: "#E8F7B0",
-    grass: ["#7DBF5A", "#5EA347"],
+    wood: "#6E4B34",
+    leaves: ["#B9F07A", "#7ED957", "#4EA83A"],
+    accent: "#4EA83A",
+    grass: ["#7FD24A", "#5FB43A"],
     shard: "#FFF3B0",
+    rain: null,
+    pinkTips: 0,
+    fallenBase: 34,
   },
   ember: {
-    stage: "#F7F1E4",
-    slab: "#DCCFB8",
-    light: "#FAF4E8",
+    stage: "#F6F1E7",
+    slab: "#CFC7B9",
+    light: "#F7F3EA",
     dark: "#4E3A2E",
-    wood: "#5A3E2E",
-    leaves: ["#D98A2B", "#F0B43C", "#B8471F"],
-    accent: "#FFE08A",
-    grass: ["#C9A85C", "#B08F45"],
+    wood: "#6E4B34",
+    leaves: ["#FFD37A", "#F5A623", "#D9761F"],
+    accent: "#D9761F",
+    grass: ["#E2C25C", "#C9A63F"],
     shard: "#FFD37A",
+    rain: { desktop: 400, mobile: 160 },
+    pinkTips: 0,
+    fallenBase: 60,
   },
 };
 
@@ -76,7 +91,7 @@ export const THEME_ORDER: ThemeName[] = ["neon", "verdant", "ember"];
 
 export const DEFAULT_THEME: ThemeName = "verdant";
 
-/** Does this theme use falling emissive shard particles? Verdant sways instead. */
+/** Living: only Ember carries weather (vertical rain). The others sway. */
 export function themeHasParticles(name: ThemeName): boolean {
-  return name === "neon" || name === "ember";
+  return THEMES[name].rain !== null;
 }

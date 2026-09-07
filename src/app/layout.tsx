@@ -5,7 +5,7 @@ import { AudioProvider } from "@/components/audio/AudioProvider";
 
 /**
  * One family for the whole site: Bricolage Grotesque (variable). Geist Mono is
- * kept ONLY for the literal URL string shown in caption plates â€” nowhere else.
+ * kept ONLY for the literal URL string shown in caption plates - nowhere else.
  */
 const bricolage = Bricolage_Grotesque({
   variable: "--font-display",
@@ -22,7 +22,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LinkForge â€” paste a link, get a tiny world that scans",
+  title: "LinkForge - paste a link, get a tiny world that scans",
   description:
     "Your URL becomes a miniature tree, city, or sculpture on a QR platform. Tap it to reveal the code; print it, share it, scan it.",
 };

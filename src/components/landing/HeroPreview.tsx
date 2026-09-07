@@ -1,12 +1,12 @@
 ﻿"use client";
 
 /**
- * HeroPreview â€” the display case's front window.
+ * HeroPreview - the display case's front window.
  *
  * Two columns 5/7 on desktop: copy left, a live Verdant Living diorama right,
  * sitting directly on the sky (no card, no screenshot). One orchestrated first-
  * load moment: platform tiles rise, then the tree grows (the DioramaStage build
- * driver). Nothing else animates on load or scroll. Reduced motion â†’ final state.
+ * driver). Nothing else animates on load or scroll. Reduced motion -> final state.
  */
 
 import { useMemo, useState } from "react";
@@ -112,7 +112,7 @@ export function HeroPreview() {
         {previewModel ? (
           <CaptionPlate
             url={raw.trim() || SEED}
-            meta={`Living, Verdant theme, ${previewModel.size}Ã—${previewModel.size}`}
+            meta={`Living, Verdant theme, ${previewModel.size}x${previewModel.size}`}
           />
         ) : null}
       </div>

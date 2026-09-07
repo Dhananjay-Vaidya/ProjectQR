@@ -48,7 +48,7 @@ const StandardQR = forwardRef<RendererHandle, StandardQRProps>(function Standard
     if (!canvas) return;
 
     const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const modulePx = Math.max(1, Math.round((sizePx / model.size) * ratio));
+    const modulePx = Math.max(1, Math.floor((sizePx / framedModules) * ratio));
     const edge = modulePx * framedModules;
 
     canvas.width = edge;

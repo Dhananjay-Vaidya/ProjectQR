@@ -32,15 +32,20 @@ const {verifiedLivingScan}=require('../src/lib/living/verifiedScan.ts');
 const {themedScanColors,luminance}=require('../src/lib/living/scanColors.ts');
 for(const check of runLivingTreeSelfChecks()){ assert(check.ok,check.name+': '+check.detail); console.log(check.name+': '+check.detail); }
 const reports=[];
+// Themed four-colour scheme + a spread of custom-palette swatches (undefined = theme).
+const swatches=[undefined,['#A8D86F','#4EA86E','#D39B54'],['#8FE3F5','#B79CFF','#F6A5E1'],['#F4C2C2','#E58FB0','#C25A7E'],['#D7B45D','#BC7A3D','#7B5A35'],['#FFFFFF','#BFBFBF','#7A7A7A']];
 for(const url of ['https://example.com','https://linkforge.app/demo','https://example.com/linkforge-test','https://example.com/'+ 'long-path-'.repeat(28)]) {
   for(const ec of ['M','Q','H']) {
     const model=buildQRModel(url,ec).model;
     for(const theme of ['neon','verdant','ember']) {
-      assert(luminance(themedScanColors(theme).dark)<=.30);
-      for(const size of [240,480,720]) {
-        const scan=verifiedLivingScan(model,theme,size);
-        assert(scan.verification.ok);
-        reports.push({version:model.version,ec,theme,size,fallback:scan.fallback});
+      for(const tints of swatches) {
+        const sc=themedScanColors(theme,tints);
+        assert(luminance(sc.darkA)<=.30 && luminance(sc.darkB)<=.30 && luminance(sc.finder)<=.30);
+        for(const size of [480,640,720]) {
+          const scan=verifiedLivingScan(model,theme,size,1,tints);
+          assert(scan.verification.ok);
+          reports.push({version:model.version,ec,theme,swatch:tints?tints[1]:'theme',size,fallback:scan.fallback});
+        }
       }
     }
   }
@@ -57,4 +62,5 @@ for(const leaf of tree.leaves.slice().sort((a,b)=>b.distance-a.distance)) {
   assert.equal(leaf.row,best.r);assert.equal(leaf.col,best.c);best.n--;
 }
 console.log('Nearest-free oracle: all assignments pass.');
-console.log(JSON.stringify({decodeChecks:reports.length,themes:['neon','verdant','ember'].map(theme=>({theme,themed:reports.filter(r=>r.theme===theme&&r.fallback==='none').length,dataInk:reports.filter(r=>r.theme===theme&&r.fallback==='data-ink').length,allInk:reports.filter(r=>r.theme===theme&&r.fallback==='all-ink').length})),versions:[...new Set(reports.map(r=>r.version))]},null,2));
+const needsFallback=reports.filter(r=>r.fallback!=='none').map(r=>`${r.theme}/${r.swatch}/v${r.version}/${r.ec}/${r.size}:${r.fallback}`);
+console.log(JSON.stringify({decodeChecks:reports.length,themes:['neon','verdant','ember'].map(theme=>({theme,themed:reports.filter(r=>r.theme===theme&&r.fallback==='none').length,dataInk:reports.filter(r=>r.theme===theme&&r.fallback==='data-ink').length,allInk:reports.filter(r=>r.theme===theme&&r.fallback==='all-ink').length})),combosNeedingFallback:needsFallback,versions:[...new Set(reports.map(r=>r.version))]},null,2));

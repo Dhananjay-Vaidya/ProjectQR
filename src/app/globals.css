@@ -491,7 +491,7 @@ body {
 .lf-audio {
   position: relative;
   display: inline-flex;
-  z-index: 20;
+  z-index: 40;
 }
 .lf-audio .lf-audio-toggle {
   position: relative;
@@ -544,7 +544,7 @@ body {
   position: absolute;
   top: calc(100% + 12px);
   right: 0;
-  width: min(360px, calc(100vw - 32px));
+  width: min(332px, calc(100vw - 32px));
   max-height: min(680px, calc(100vh - 96px));
   overflow: auto;
   padding: 16px;
@@ -554,7 +554,7 @@ body {
   box-shadow: 0 24px 70px rgba(42, 50, 38, .18), inset 0 1px 0 rgba(255,255,255,.9);
   backdrop-filter: blur(16px);
   color: var(--lf-ink);
-  z-index: 24;
+  z-index: 44;
 }
 .lf-audio-panel__head {
   display: flex;
@@ -630,7 +630,7 @@ body {
   gap: 8px;
   margin-top: 14px;
 }
-.lf-audio-mini { padding: 0 10px; }
+.lf-audio-mini { padding: 0 8px; min-width: 0; }
 .lf-audio-tracks {
   display: grid;
   gap: 12px;
@@ -698,7 +698,7 @@ body {
   inset: 0;
   border: 0;
   background: transparent;
-  z-index: 19;
+  z-index: 39;
 }
 .lf-enter-sound {
   justify-self: center;
