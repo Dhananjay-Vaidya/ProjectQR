@@ -48,9 +48,14 @@ interface RotationControl {
   current: number;
   target: number;
   velocity: number;
+  zoom: number;
+  targetZoom: number;
+  savedZoom: number;
   dragging: boolean;
   lastX: number;
   startX: number;
+  pointers: Map<number, { x: number; y: number }>;
+  pinchDistance: number;
   saved: number;
   idle: number;
   moved: boolean;
@@ -69,7 +74,22 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
   const [dragging, setDragging] = useState(false);
   const [didDrag, setDidDrag] = useState(false);
   const exportResolve = useRef<((img: ExportedImage) => void) | null>(null);
-  const rotation = useRef<RotationControl>({ current: 0, target: 0, velocity: 0, dragging: false, lastX: 0, startX: 0, saved: 0, idle: 0, moved: false });
+  const rotation = useRef<RotationControl>({
+    current: 0,
+    target: 0,
+    velocity: 0,
+    zoom: 1,
+    targetZoom: 1,
+    savedZoom: 1,
+    dragging: false,
+    lastX: 0,
+    startX: 0,
+    pointers: new Map(),
+    pinchDistance: 0,
+    saved: 0,
+    idle: 0,
+    moved: false,
+  });
 
   const doExport = useCallback(
     (): Promise<ExportedImage> =>
@@ -96,6 +116,14 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
       onPointerDown={(event) => {
         if (view === "scan") return;
         const rot = rotation.current;
+        rot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (rot.pointers.size === 2) {
+          const pts = [...rot.pointers.values()];
+          rot.pinchDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+          rot.dragging = false;
+          setDragging(false);
+          return;
+        }
         rot.dragging = true;
         rot.lastX = event.clientX;
         rot.startX = event.clientX;
@@ -107,6 +135,22 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
       }}
       onPointerMove={(event) => {
         const rot = rotation.current;
+        const point = rot.pointers.get(event.pointerId);
+        if (point) {
+          point.x = event.clientX;
+          point.y = event.clientY;
+        }
+        if (rot.pointers.size === 2 && view !== "scan") {
+          const pts = [...rot.pointers.values()];
+          const next = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+          if (rot.pinchDistance > 0) {
+            rot.targetZoom = THREE.MathUtils.clamp(rot.targetZoom * (next / rot.pinchDistance), 0.75, 1.8);
+            rot.savedZoom = rot.targetZoom;
+          }
+          rot.pinchDistance = next;
+          if (!didDrag) setDidDrag(true);
+          return;
+        }
         if (!rot.dragging || view === "scan") return;
         const dx = event.clientX - rot.lastX;
         rot.lastX = event.clientX;
@@ -121,6 +165,8 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
       onPointerUp={(event) => {
         const rot = rotation.current;
         const wasClick = !rot.moved;
+        rot.pointers.delete(event.pointerId);
+        rot.pinchDistance = 0;
         rot.dragging = false;
         setDragging(false);
         event.currentTarget.releasePointerCapture?.(event.pointerId);
@@ -128,7 +174,17 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
       }}
       onPointerCancel={() => {
         rotation.current.dragging = false;
+        rotation.current.pointers.clear();
+        rotation.current.pinchDistance = 0;
         setDragging(false);
+      }}
+      onWheel={(event) => {
+        if (view === "scan") return;
+        event.preventDefault();
+        const rot = rotation.current;
+        rot.targetZoom = THREE.MathUtils.clamp(rot.targetZoom * Math.exp(-event.deltaY * 0.0012), 0.75, 1.8);
+        rot.savedZoom = rot.targetZoom;
+        rot.idle = 0;
       }}
       style={{
         width: "100%",
@@ -139,7 +195,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
         borderRadius: stageBg ? 14 : 0,
         transition: "background 900ms ease",
         position: "relative",
-        touchAction: "pan-y",
+        touchAction: "pan-y pinch-zoom",
       }}
       role="img"
       aria-label={`City model for ${model.encodedUrl}, ${view === "scan" ? "scan view" : "experience view"}`}
@@ -150,7 +206,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
         gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
         orthographic
         camera={{ position: [0, 40, 0], zoom: 10, near: 0.1, far: 400 }}
-        style={{ touchAction: "pan-y" }}
+        style={{ touchAction: "pan-y pinch-zoom" }}
         onCreated={({ gl, scene }) => {
           glRef.current = gl;
           sceneRef.current = scene;
@@ -183,7 +239,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
           }}
         />
       </Canvas>
-      {!didDrag && view === "explore" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate</span> : null}
+      {!didDrag && view === "explore" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate · Scroll to zoom</span> : null}
     </div>
   );
 });
@@ -271,26 +327,32 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
   const planeGeo = useMemo(() => planeGeometry(), []);
   const windowData = useMemo(() => {
     const dots: { x: number; y: number; z: number; rot: number; warm: boolean; lit: number; seed: number }[] = [];
-    const cap = mobile ? 520 : 1300;
+    const cap = mobile ? 1600 : 4200;
     for (const b of city.buildings) {
       if (b.klass === "protected" || dots.length >= cap) continue;
       const floors = Math.max(1, Math.floor(b.height / 0.35));
-      const cols = Math.max(1, Math.floor(Math.max(b.spanX, b.spanZ) / 0.32));
+      const cols = Math.max(1, Math.floor(Math.max(b.spanX, b.spanZ) / 0.24));
       for (let f = 0; f < floors && dots.length < cap; f++) {
         for (let c = 0; c < cols && dots.length < cap; c++) {
           const h = ((b.seed * 0.000013 + f * 12.9898 + c * 78.233) % 1 + 1) % 1;
-          if (h > 0.72) continue;
+          const density = b.klass === "landmark" ? 0.86 : b.klass === "tall" ? 0.8 : b.klass === "mid" ? 0.72 : 0.58;
+          if (h > density) continue;
           const u = (c + 0.5) / cols - 0.5;
-          const side = h > 0.36;
-          dots.push({
-            x: b.x + (side ? Math.sign(Math.sin(b.seed)) * b.spanX * 0.505 : u * b.spanX * 0.72),
-            y: 0.26 + f * 0.35,
-            z: b.z + (side ? u * b.spanZ * 0.72 : Math.sign(Math.cos(b.seed)) * b.spanZ * 0.505),
-            rot: side ? Math.PI / 2 : 0,
-            warm: h < 0.58,
-            lit: h,
-            seed: b.seed + f * 37 + c * 101,
-          });
+          for (let side = 0; side < 4 && dots.length < cap; side++) {
+            const sideHash = ((h + side * 0.217 + f * 0.031) % 1 + 1) % 1;
+            if (sideHash > density) continue;
+            const alongX = side < 2;
+            const sign = side % 2 === 0 ? 1 : -1;
+            dots.push({
+              x: b.x + (alongX ? u * b.spanX * 0.72 : sign * b.spanX * 0.505),
+              y: 0.26 + f * 0.35,
+              z: b.z + (alongX ? sign * b.spanZ * 0.505 : u * b.spanZ * 0.72),
+              rot: alongX ? 0 : Math.PI / 2,
+              warm: sideHash < 0.62,
+              lit: sideHash,
+              seed: b.seed + f * 37 + c * 101 + side * 17,
+            });
+          }
         }
       }
     }
@@ -319,9 +381,12 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
   const grow = useRef(reduced ? 1 : 0);
   const clock = useRef(0);
   const themeT = useRef(1);
+  const timeT = useRef(1);
   const scanProgress = useRef(view === "scan" ? 1 : 0);
   const fromTheme = useRef<ThemeName>(theme);
   const toThemeRef = useRef<ThemeName>(theme);
+  const fromTime = useRef<"day" | "night">(cityTime);
+  const toTimeRef = useRef<"day" | "night">(cityTime);
   const flock = useRef({ mode: "circle" as "circle" | "away" | "back", timer: city.birds.flockTimer, edge: city.birds.flockEdge });
   const planeState = useRef({ next: city.plane.firstDelay, active: false, u: 0 });
   const trailIdx = useRef(0);
@@ -341,6 +406,9 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
       rotation.current.target = 0;
       rotation.current.saved = 0;
       rotation.current.velocity = 0;
+      rotation.current.zoom = 1;
+      rotation.current.targetZoom = 1;
+      rotation.current.savedZoom = 1;
       rotation.current.idle = 0;
     };
     window.addEventListener("linkforge:reset-city-view", reset);
@@ -356,10 +424,19 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
     }
   }, [theme]);
 
+  useEffect(() => {
+    if (toTimeRef.current !== cityTime) {
+      fromTime.current = toTimeRef.current;
+      toTimeRef.current = cityTime;
+      timeT.current = 0;
+    }
+  }, [cityTime]);
+
   /* ---- static population (geometry + base colours), once per model/theme ---- */
   useEffect(() => {
     const et = themeT.current * themeT.current * (3 - 2 * themeT.current);
-    const pal = CITY_TIME_THEMES[cityTime] ?? lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), et);
+    const te = timeT.current * timeT.current * (3 - 2 * timeT.current);
+    const pal = lerpTheme(CITY_TIME_THEMES[fromTime.current], CITY_TIME_THEMES[cityTime], te) ?? lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), et);
 
     // buildings
     const bm = buildings.current;
@@ -566,7 +643,10 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
     uniforms.uTime.value = clock.current;
     const wanted = view === "scan" ? 1 : 0;
     if (previousView.current !== view) {
-      if (view === "scan") rotation.current.saved = rotation.current.target;
+      if (view === "scan") {
+        rotation.current.saved = rotation.current.target;
+        rotation.current.savedZoom = rotation.current.targetZoom;
+      }
       previousView.current = view;
     }
     scanProgress.current = reduced
@@ -581,8 +661,12 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
     const pSmooth = p * p * (3 - 2 * p);
     const detailFade = 1 - THREE.MathUtils.smoothstep(p, 0.08, 0.42);
     const envFade = 1 - THREE.MathUtils.smoothstep(p, 0.04, 0.28);
-    const pal = CITY_TIME_THEMES[cityTime] ?? cityTheme(theme);
-    const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8").lerp(new THREE.Color(colors.background), pSmooth);
+    if (timeT.current < 1) timeT.current = Math.min(1, timeT.current + delta / 0.95);
+    const timeEase = timeT.current * timeT.current * (3 - 2 * timeT.current);
+    const pal = lerpTheme(CITY_TIME_THEMES[fromTime.current], CITY_TIME_THEMES[cityTime], timeEase) ?? cityTheme(theme);
+    const clear = new THREE.Color(fromTime.current === "night" ? "#0E1718" : "#F4F0E8")
+      .lerp(new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8"), timeEase)
+      .lerp(new THREE.Color(colors.background), pSmooth);
     gl.setClearColor(clear, 1);
     scene.background = clear;
     const rot = rotation.current;
@@ -595,10 +679,14 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
       rot.velocity *= 0.92;
     }
     const targetRotation = view === "scan" ? 0 : rot.saved;
+    const targetZoom = view === "scan" ? 1 : rot.savedZoom;
     const rotationMix = view === "scan" ? pSmooth : 1 - pSmooth;
     if (view === "scan") rot.target = THREE.MathUtils.lerp(rot.target, 0, rotationMix * 0.2);
     else if (p > 0.001) rot.target = THREE.MathUtils.lerp(0, targetRotation, rotationMix);
+    if (view === "scan") rot.targetZoom = THREE.MathUtils.lerp(rot.targetZoom, 1, pSmooth * 0.22);
+    else if (p > 0.001) rot.targetZoom = THREE.MathUtils.lerp(1, targetZoom, 1 - pSmooth);
     rot.current = THREE.MathUtils.lerp(rot.current, rot.target, reduced ? 1 : 0.18);
+    rot.zoom = THREE.MathUtils.lerp(rot.zoom, rot.targetZoom, reduced ? 1 : 0.18);
     if (worldGroup.current) worldGroup.current.rotation.y = p > 0.985 ? 0 : rot.current;
 
     const cam = camera as THREE.OrthographicCamera;
@@ -614,7 +702,7 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
     cam.right = viewHalf * aspect;
     cam.top = viewHalf;
     cam.bottom = -viewHalf;
-    cam.zoom = 1;
+    cam.zoom = p > 0.985 ? 1 : rot.zoom;
     cam.near = 0.1;
     cam.far = worldSize * 6;
     cam.updateProjectionMatrix();
@@ -631,17 +719,18 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
         windowDots.current.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, windowData.length) * 3).fill(1), 3);
         (windowDots.current.material as THREE.Material).needsUpdate = true;
       }
-      const nightAmount = cityTime === "night" ? 1 : 0.12;
+      const nightAmount = THREE.MathUtils.lerp(fromTime.current === "night" ? 1 : 0.04, cityTime === "night" ? 1 : 0.04, timeEase);
       const visible = (1 - pSmooth) * nightAmount;
       for (let i = 0; i < windowData.length; i++) {
         const w = windowData[i];
         const flicker = cityTime === "night" && !reduced ? 0.82 + 0.18 * Math.sin(clock.current * 1.7 + w.seed) : 1;
         _d.position.set(w.x, w.y, w.z);
         _d.rotation.set(0, w.rot, 0);
-        _d.scale.set(0.11, 0.16, Math.max(0.006, visible * 0.025));
+        _d.scale.set(0.26, 0.34, Math.max(0.012, visible * 0.065));
         _d.updateMatrix();
         windowDots.current.setMatrixAt(i, _d.matrix);
-        _c.set(w.warm ? (w.lit < 0.4 ? "#FFD27A" : "#F2B65C") : "#AFCFFF").multiplyScalar(Math.max(0.18, visible * flicker));
+        const strength = cityTime === "night" ? 0.9 + 0.45 * flicker : 0.22;
+        _c.set(w.warm ? (w.lit < 0.4 ? "#FFD27A" : "#FFC765") : "#B9D9FF").multiplyScalar(visible * strength);
         windowDots.current.setColorAt(i, _c);
       }
       windowDots.current.count = p > 0.94 ? 0 : windowData.length;

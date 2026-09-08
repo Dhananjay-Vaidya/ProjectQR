@@ -34,9 +34,14 @@ interface RotationControl {
   current: number;
   target: number;
   velocity: number;
+  zoom: number;
+  targetZoom: number;
+  savedZoom: number;
   dragging: boolean;
   lastX: number;
   startX: number;
+  pointers: Map<number, { x: number; y: number }>;
+  pinchDistance: number;
   saved: number;
   idle: number;
   moved: boolean;
@@ -83,7 +88,22 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
   const [settled, setSettled] = useState(view === "scan");
   const [dragging, setDragging] = useState(false);
   const [didDrag, setDidDrag] = useState(false);
-  const rotation = useRef<RotationControl>({ current: 0, target: 0, velocity: 0, dragging: false, lastX: 0, startX: 0, saved: 0, idle: 0, moved: false });
+  const rotation = useRef<RotationControl>({
+    current: 0,
+    target: 0,
+    velocity: 0,
+    zoom: 1,
+    targetZoom: 1,
+    savedZoom: 1,
+    dragging: false,
+    lastX: 0,
+    startX: 0,
+    pointers: new Map(),
+    pinchDistance: 0,
+    saved: 0,
+    idle: 0,
+    moved: false,
+  });
 
   const tints = useMemo<[string, string, string] | undefined>(
     () => (leafPalette === "theme" ? undefined : resolveLeafTints(theme, leafPalette, customLeafColors)),
@@ -125,6 +145,14 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
       onPointerDown={(event) => {
         if (view === "scan") return;
         const rot = rotation.current;
+        rot.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (rot.pointers.size === 2) {
+          const pts = [...rot.pointers.values()];
+          rot.pinchDistance = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+          rot.dragging = false;
+          setDragging(false);
+          return;
+        }
         rot.dragging = true;
         rot.lastX = event.clientX;
         rot.startX = event.clientX;
@@ -136,6 +164,22 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
       }}
       onPointerMove={(event) => {
         const rot = rotation.current;
+        const point = rot.pointers.get(event.pointerId);
+        if (point) {
+          point.x = event.clientX;
+          point.y = event.clientY;
+        }
+        if (rot.pointers.size === 2 && view !== "scan") {
+          const pts = [...rot.pointers.values()];
+          const next = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+          if (rot.pinchDistance > 0) {
+            rot.targetZoom = THREE.MathUtils.clamp(rot.targetZoom * (next / rot.pinchDistance), 0.75, 1.8);
+            rot.savedZoom = rot.targetZoom;
+          }
+          rot.pinchDistance = next;
+          if (!didDrag) setDidDrag(true);
+          return;
+        }
         if (!rot.dragging || view === "scan") return;
         const dx = event.clientX - rot.lastX;
         rot.lastX = event.clientX;
@@ -150,6 +194,8 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
       onPointerUp={(event) => {
         const rot = rotation.current;
         const wasClick = !rot.moved;
+        rot.pointers.delete(event.pointerId);
+        rot.pinchDistance = 0;
         rot.dragging = false;
         setDragging(false);
         event.currentTarget.releasePointerCapture?.(event.pointerId);
@@ -157,7 +203,17 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
       }}
       onPointerCancel={() => {
         rotation.current.dragging = false;
+        rotation.current.pointers.clear();
+        rotation.current.pinchDistance = 0;
         setDragging(false);
+      }}
+      onWheel={(event) => {
+        if (view === "scan") return;
+        event.preventDefault();
+        const rot = rotation.current;
+        rot.targetZoom = THREE.MathUtils.clamp(rot.targetZoom * Math.exp(-event.deltaY * 0.0012), 0.75, 1.8);
+        rot.savedZoom = rot.targetZoom;
+        rot.idle = 0;
       }}
       style={{
         width: "100%",
@@ -165,7 +221,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
         minHeight: studioPreview ? 0 : sizePx,
         position: "relative",
         cursor: view === "scan" ? (onToggleView ? "pointer" : "default") : dragging ? "grabbing" : "grab",
-        touchAction: "pan-y",
+        touchAction: "pan-y pinch-zoom",
       }}
     >
       {result.scan ? (
@@ -182,7 +238,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
               onReady?.();
             }}
             onError={() => onWebglError?.("3D rendering is unavailable. Standard QR mode has been enabled.")}
-            style={{ touchAction: "pan-y" }}
+            style={{ touchAction: "pan-y pinch-zoom" }}
             aria-label={`Living tree, ${tree.leaves.length} leaves, ${view} view`}
           >
             <hemisphereLight args={[0xffffff, 0xdccfbf, 1.15]} />
@@ -208,7 +264,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
               inspectFlat={inspectFlat}
             />
           </Canvas>
-          {!didDrag && view === "experience" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate</span> : null}
+          {!didDrag && view === "experience" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate · Scroll to zoom</span> : null}
           {result.scan.fallback !== "none" && (!studioPreview || view === "scan") ? (
             <span role="status" style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", fontSize: 12 }}>
               {THEME_LABEL[theme]}: high-contrast scan colours ({result.scan.fallback}).
@@ -563,6 +619,9 @@ function LivingScene({
       rotation.current.target = 0;
       rotation.current.saved = 0;
       rotation.current.velocity = 0;
+      rotation.current.zoom = 1;
+      rotation.current.targetZoom = 1;
+      rotation.current.savedZoom = 1;
       rotation.current.idle = 0;
     };
     window.addEventListener("linkforge:reset-living-view", reset);
@@ -576,7 +635,10 @@ function LivingScene({
 
     const wanted = view === "scan" ? 1 : 0;
     if (previousView.current !== view) {
-      if (view === "scan") rotation.current.saved = rotation.current.target;
+      if (view === "scan") {
+        rotation.current.saved = rotation.current.target;
+        rotation.current.savedZoom = rotation.current.targetZoom;
+      }
       previousView.current = view;
     }
 
@@ -612,10 +674,14 @@ function LivingScene({
       rot.velocity *= 0.92;
     }
     const targetRotation = view === "scan" ? 0 : rot.saved;
+    const targetZoom = view === "scan" ? 1 : rot.savedZoom;
     const rotationMix = view === "scan" ? ease(clamp01(p / 0.35)) : ease(1 - clamp01(p / 0.35));
     if (view === "scan") rot.target = THREE.MathUtils.lerp(rot.target, 0, rotationMix * 0.18);
     else if (p > 0.001) rot.target = THREE.MathUtils.lerp(0, targetRotation, rotationMix);
+    if (view === "scan") rot.targetZoom = THREE.MathUtils.lerp(rot.targetZoom, 1, ease(clamp01(p / 0.45)) * 0.22);
+    else if (p > 0.001) rot.targetZoom = THREE.MathUtils.lerp(1, targetZoom, ease(1 - clamp01(p / 0.45)));
     rot.current = THREE.MathUtils.lerp(rot.current, rot.target, reduced ? 1 : 0.18);
+    rot.zoom = THREE.MathUtils.lerp(rot.zoom, rot.targetZoom, reduced ? 1 : 0.18);
     if (worldGroup.current) worldGroup.current.rotation.y = p > 0.985 ? 0 : rot.current;
 
     const preview = inspectProgress !== undefined;
@@ -639,7 +705,7 @@ function LivingScene({
     cam.bottom = -half;
     cam.right = half * aspect;
     cam.left = -half * aspect;
-    cam.zoom = 1;
+    cam.zoom = p > 0.985 ? 1 : rot.zoom;
     cam.updateProjectionMatrix();
 
     dir.copy(ISO_DIR).lerp(up.set(0, 1, 0), camMix).normalize();

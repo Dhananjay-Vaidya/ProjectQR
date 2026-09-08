@@ -14,6 +14,7 @@ export function ModeFromQuery() {
   const setRawUrl = useEditorStore((s) => s.setRawUrl);
   const commitUrl = useEditorStore((s) => s.commitUrl);
   const setTheme = useEditorStore((s) => s.setTheme);
+  const setCity = useEditorStore((s) => s.setCity);
 
   useEffect(() => {
     const m = params.get("mode") === "particles" ? "particle" : params.get("mode");
@@ -28,7 +29,9 @@ export function ModeFromQuery() {
     const theme = params.get("theme");
     if (theme === "neon-bloom") setTheme("neon");
     else if (theme === "verdant" || theme === "ember") setTheme(theme as ThemeName);
-  }, [params, commitUrl, setRawUrl, setRenderer, setTheme]);
+    const time = params.get("time");
+    if (time === "day" || time === "night") setCity({ time });
+  }, [params, commitUrl, setRawUrl, setRenderer, setTheme, setCity]);
 
   return null;
 }

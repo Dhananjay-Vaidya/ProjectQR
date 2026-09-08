@@ -28,7 +28,7 @@ export function Editor() {
   const [notice, setNotice] = useState<string | null>(null);
   const isDiorama = s.renderer === "living" || s.renderer === "city" || s.renderer === "particle";
   const modeName = s.renderer === "particle" ? "particles" : s.renderer;
-  const query = (mode = modeName, theme = s.theme, url = s.rawUrl) => `/create?mode=${mode}&theme=${theme === "neon" ? "neon-bloom" : theme}&url=${encodeURIComponent(url)}`;
+  const query = (mode = modeName, theme = s.theme, url = s.rawUrl) => `/create?mode=${mode}&theme=${theme === "neon" ? "neon-bloom" : theme}&url=${encodeURIComponent(url)}${mode === "city" ? `&time=${s.city.time}` : ""}`;
   const updateUrl = (value: string) => { s.setRawUrl(value); router.replace(query(modeName, s.theme, value)); };
   const changeMode = (mode: RendererMode) => { s.setRenderer(mode); router.push(query(mode === "particle" ? "particles" : mode)); };
   const changeTheme = (theme: ThemeName) => { s.setTheme(theme); router.push(query(modeName, theme)); };
