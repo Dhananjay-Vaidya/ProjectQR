@@ -6,15 +6,17 @@ import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useEditorStore } from "@/stores/editorStore";
 import { RENDERER_MODES, type RendererMode } from "@/types/qr";
+import type { ThemeName } from "@/lib/living/themes";
 
 export function ModeFromQuery() {
   const params = useSearchParams();
   const setRenderer = useEditorStore((s) => s.setRenderer);
   const setRawUrl = useEditorStore((s) => s.setRawUrl);
   const commitUrl = useEditorStore((s) => s.commitUrl);
+  const setTheme = useEditorStore((s) => s.setTheme);
 
   useEffect(() => {
-    const m = params.get("mode");
+    const m = params.get("mode") === "particles" ? "particle" : params.get("mode");
     if (m && (RENDERER_MODES as readonly string[]).includes(m)) {
       setRenderer(m as RendererMode);
     }
@@ -23,8 +25,10 @@ export function ModeFromQuery() {
       setRawUrl(url);
       queueMicrotask(commitUrl);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const theme = params.get("theme");
+    if (theme === "neon-bloom") setTheme("neon");
+    else if (theme === "verdant" || theme === "ember") setTheme(theme as ThemeName);
+  }, [params, commitUrl, setRawUrl, setRenderer, setTheme]);
 
   return null;
 }

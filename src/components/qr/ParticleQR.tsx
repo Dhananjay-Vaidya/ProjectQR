@@ -167,10 +167,6 @@ function ParticleScene({
   const reducedMotion = usePrefersReducedMotion();
 
   const cells = useMemo(() => darkCells(model), [model]);
-  const protectedCells = useMemo(
-    () => cells.filter((c) => c.protected),
-    [cells]
-  );
   const worldSize = useMemo(() => framedWorldSize(model), [model]);
   const halfExtent = useMemo(() => scanOrthoHalfExtent(model), [model]);
 
@@ -184,9 +180,9 @@ function ParticleScene({
   );
 
   const count = useMemo(() => {
-    const clamped = Math.max(1500, Math.min(9000, Math.round(particleCount)));
+    const clamped = Math.max(cells.length * 14, Math.min(9000, Math.round(particleCount)));
     return clamped;
-  }, [particleCount]);
+  }, [cells.length, particleCount]);
 
   // Precompute per-particle scatter + target + control (arc) point + a
   // deterministic delay and speed. All in typed arrays, once per model/count.
@@ -207,9 +203,10 @@ function ParticleScene({
 
     for (let i = 0; i < count; i++) {
       const cell = darkList[i % darkList.length];
-      // Tighter fill (was 0.84) so assembled cells read solid, not speckled.
-      const jx = (rng() - 0.5) * 0.66;
-      const jz = (rng() - 0.5) * 0.66;
+      // Each point stays inside a 0.10-module jitter envelope in the assembled
+      // state, so particles reinforce a single unambiguous QR cell.
+      const jx = (rng() - 0.5) * 0.2;
+      const jz = (rng() - 0.5) * 0.2;
       const tx = cell.x + jx;
       const tz = cell.z + jz;
       targets[i * 3] = tx;
@@ -253,28 +250,30 @@ function ParticleScene({
     return p;
   }, [count, scatter]);
 
-  // Underlay solid blocks for protected modules.
+  // Underlay every dark module. The 60% cell tile is the scan-safe base while
+  // particles provide the assembled sculpture effect above it.
   useEffect(() => {
     const mesh = underlayRef.current;
     if (!mesh) return;
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < protectedCells.length; i++) {
-      const cell = protectedCells[i];
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
       dummy.position.set(cell.x, 0.02, cell.z);
-      dummy.scale.set(0.98, 0.04, 0.98);
+      dummy.scale.set(0.6, 0.04, 0.6);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       mesh.setColorAt(i, fgColor);
     }
-    mesh.count = protectedCells.length;
+    mesh.count = cells.length;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [protectedCells, fgColor]);
+  }, [cells, fgColor]);
 
   useEffect(() => {
-    gl.setClearColor(bgColor, 1);
-    scene.background = bgColor;
-  }, [gl, scene, bgColor]);
+    const scanSurface = state === "assembled";
+    gl.setClearColor(scanSurface ? bgColor : new THREE.Color("#000000"), scanSurface ? 1 : 0);
+    scene.background = scanSurface ? bgColor : null;
+  }, [gl, scene, bgColor, state]);
 
   // Jump immediately when reduced motion is requested.
   useEffect(() => {
@@ -399,10 +398,7 @@ function ParticleScene({
   // and the 900px export. One module is 1 world unit. With ~16 particles/cell
   // and this size the assembled dark cells read solid. Tuned via browser QA
   // (was ~0.08 — far too sparse to read as a QR).
-  const pointSize = useMemo(() => {
-    const perCell = count / Math.max(1, cells.length);
-    return Math.max(0.22, Math.min(0.6, 1.6 / Math.sqrt(perCell)));
-  }, [count, cells.length]);
+  const pointSize = 0.32;
 
   return (
     <>
@@ -420,7 +416,7 @@ function ParticleScene({
 
       <instancedMesh
         ref={underlayRef}
-        args={[undefined, undefined, Math.max(1, protectedCells.length)]}
+        args={[undefined, undefined, Math.max(1, cells.length)]}
       >
         <boxGeometry args={[1, 1, 1]} />
         <meshBasicMaterial vertexColors />

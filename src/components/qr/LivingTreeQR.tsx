@@ -1,5 +1,5 @@
 "use client";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { RendererHandle, RendererProps } from "./types";
@@ -30,6 +30,17 @@ import { QUIET_ZONE_MODULES, type QRModel } from "@/types/qr";
 import { domainRng, buildGenerativeSeed } from "@/lib/generativeSeed";
 
 const RAIN_MAX = 400;
+interface RotationControl {
+  current: number;
+  target: number;
+  velocity: number;
+  dragging: boolean;
+  lastX: number;
+  startX: number;
+  saved: number;
+  idle: number;
+  moved: boolean;
+}
 
 export interface LivingTreeQRProps extends RendererProps {
   view: "experience" | "scan";
@@ -40,6 +51,7 @@ export interface LivingTreeQRProps extends RendererProps {
   onWebglError?: (message: string) => void;
   leafPalette?: LeafPaletteName;
   customLeafColors?: [string, string, string];
+  customTrunk?: string;
   /** Verification harness only: freeze the reversible clock at a chosen phase. */
   inspectProgress?: number;
   inspectFlat?: boolean;
@@ -61,6 +73,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
     studioPreview = false,
     leafPalette = "theme",
     customLeafColors = ["#B9F07A", "#7ED957", "#4EA83A"],
+    customTrunk = "#5C3A27",
   },
   ref,
 ) {
@@ -68,6 +81,9 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
   const active = useSceneActive<HTMLDivElement>();
   const reduced = usePrefersReducedMotion();
   const [settled, setSettled] = useState(view === "scan");
+  const [dragging, setDragging] = useState(false);
+  const [didDrag, setDidDrag] = useState(false);
+  const rotation = useRef<RotationControl>({ current: 0, target: 0, velocity: 0, dragging: false, lastX: 0, startX: 0, saved: 0, idle: 0, moved: false });
 
   const tints = useMemo<[string, string, string] | undefined>(
     () => (leafPalette === "theme" ? undefined : resolveLeafTints(theme, leafPalette, customLeafColors)),
@@ -106,11 +122,50 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
       data-leaves={tree.leaves.length}
       data-slots={tree.slotsPerModule}
       data-fallback={result.scan?.fallback}
+      onPointerDown={(event) => {
+        if (view === "scan") return;
+        const rot = rotation.current;
+        rot.dragging = true;
+        rot.lastX = event.clientX;
+        rot.startX = event.clientX;
+        rot.velocity = 0;
+        rot.idle = 0;
+        rot.moved = false;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        setDragging(true);
+      }}
+      onPointerMove={(event) => {
+        const rot = rotation.current;
+        if (!rot.dragging || view === "scan") return;
+        const dx = event.clientX - rot.lastX;
+        rot.lastX = event.clientX;
+        rot.target += dx * 0.012;
+        rot.velocity = dx * 0.0012;
+        rot.saved = rot.target;
+        if (Math.abs(event.clientX - rot.startX) > 4) {
+          rot.moved = true;
+          if (!didDrag) setDidDrag(true);
+        }
+      }}
+      onPointerUp={(event) => {
+        const rot = rotation.current;
+        const wasClick = !rot.moved;
+        rot.dragging = false;
+        setDragging(false);
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        if (wasClick && onToggleView) onToggleView();
+      }}
+      onPointerCancel={() => {
+        rotation.current.dragging = false;
+        setDragging(false);
+      }}
       style={{
         width: "100%",
         height: "100%",
         minHeight: studioPreview ? 0 : sizePx,
         position: "relative",
+        cursor: view === "scan" ? (onToggleView ? "pointer" : "default") : dragging ? "grabbing" : "grab",
+        touchAction: "pan-y",
       }}
     >
       {result.scan ? (
@@ -118,6 +173,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
           <Canvas
             orthographic
             dpr={hero ? [1, Math.min(1.5, quality.dpr[1])] : quality.dpr}
+            frameloop="always"
             gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
             camera={{ position: [40, 32, 40], near: 0.1, far: 400 }}
             onCreated={({ gl }) => {
@@ -126,7 +182,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
               onReady?.();
             }}
             onError={() => onWebglError?.("3D rendering is unavailable. Standard QR mode has been enabled.")}
-            style={{ cursor: onToggleView ? "pointer" : "default", touchAction: "pan-y" }}
+            style={{ touchAction: "pan-y" }}
             aria-label={`Living tree, ${tree.leaves.length} leaves, ${view} view`}
           >
             <hemisphereLight args={[0xffffff, 0xdccfbf, 1.15]} />
@@ -139,18 +195,20 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
               theme={theme}
               tints={tints}
               customLeafColors={customLeafColors}
+              customTrunk={customTrunk}
               leafPalette={leafPalette}
               mobile={quality.tier === "low"}
               view={view}
               buildNonce={buildNonce}
               active={active.active}
               reduced={reduced}
-              onToggle={onToggleView}
+              rotation={rotation}
               onSettled={setSettled}
               inspectProgress={inspectProgress}
               inspectFlat={inspectFlat}
             />
           </Canvas>
+          {!didDrag && view === "experience" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate</span> : null}
           {result.scan.fallback !== "none" && (!studioPreview || view === "scan") ? (
             <span role="status" style={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", fontSize: 12 }}>
               {THEME_LABEL[theme]}: high-contrast scan colours ({result.scan.fallback}).
@@ -176,13 +234,14 @@ interface SceneProps {
   theme: ThemeName;
   tints?: [string, string, string];
   customLeafColors: [string, string, string];
+  customTrunk: string;
   leafPalette: LeafPaletteName;
   mobile: boolean;
   view: "experience" | "scan";
   buildNonce: number;
   active: boolean;
   reduced: boolean;
-  onToggle?: () => void;
+  rotation: RefObject<RotationControl>;
   onSettled: (value: boolean) => void;
   inspectProgress?: number;
   inspectFlat: boolean;
@@ -228,12 +287,14 @@ function LivingScene({
   scan,
   theme,
   tints,
+  customTrunk,
+  leafPalette,
   mobile,
   view,
   buildNonce,
   active,
   reduced,
-  onToggle,
+  rotation,
   onSettled,
   inspectProgress,
   inspectFlat,
@@ -247,6 +308,10 @@ function LivingScene({
   const fallen = useRef<THREE.InstancedMesh>(null);
   const rain = useRef<THREE.InstancedMesh>(null);
   const perchBirds = useRef<THREE.InstancedMesh>(null);
+  const birdBodies = useRef<THREE.InstancedMesh>(null);
+  const butterflies = useRef<THREE.InstancedMesh>(null);
+  const butterflyBodies = useRef<THREE.InstancedMesh>(null);
+  const worldGroup = useRef<THREE.Group>(null);
   const wood = useRef<THREE.Mesh>(null);
   const slab = useRef<THREE.Mesh>(null);
   const ground = useRef<THREE.Mesh>(null);
@@ -320,10 +385,12 @@ function LivingScene({
       toneMapped: false,
     });
     const birdMat = new THREE.MeshBasicMaterial({ color: "#23273A", side: THREE.DoubleSide, toneMapped: false });
-    return { leaf, tile, plate, lm, tm, gm, fm, base, wm, sm, rm, birdMat, wood: woodGeometry(tree), slab: slabGeometry(side), tuft: tuftGeometry(), rain: rainGeometry(), bird: birdWingGeometry() };
+    const butterflyMat = new THREE.MeshBasicMaterial({ color: "#F2B866", side: THREE.DoubleSide, toneMapped: false });
+    return { leaf, tile, plate, lm, tm, gm, fm, base, wm, sm, rm, birdMat, butterflyMat, wood: woodGeometry(tree), slab: slabGeometry(side), tuft: tuftGeometry(), rain: rainGeometry(), bird: birdWingGeometry() };
   }, [tree, side, flatUniform]);
 
-  const birdCount = mobile ? 3 : 5;
+  const birdCount = mobile ? 2 : 4;
+  const butterflyCount = mobile ? 3 : 8;
   const perch = useMemo(() => {
     const r = domainRng(buildGenerativeSeed(model.encodedUrl), "particleSeed");
     const tips = tree.branches.filter((b) => b.primary).map((b) => b.to as Vec3);
@@ -342,6 +409,17 @@ function LivingScene({
   useEffect(() => {
     birdState.current = { clock: 0, wasRevealed: false, returnClock: -1, turns: perch.map((p) => p.turnAt) };
   }, [perch]);
+  const butterflyData = useMemo(() => {
+    const r = domainRng(buildGenerativeSeed(model.encodedUrl), "colorSeed");
+    return Array.from({ length: butterflyCount }, (_, i) => ({
+      radius: tree.canopyRadius * (0.28 + r() * 0.34),
+      height: tree.height * (0.2 + r() * 0.55),
+      speed: 0.08 + r() * 0.08,
+      phase: (i / butterflyCount) * TAU + r() * 0.6,
+      bob: 0.25 + r() * 0.45,
+      tint: r(),
+    }));
+  }, [model.encodedUrl, butterflyCount, tree.canopyRadius, tree.height]);
 
   // Target colours (theme + custom palette). Frame loop lerps toward these.
   const target = useMemo(() => {
@@ -358,14 +436,16 @@ function LivingScene({
       tileData: new THREE.Color("#DED6C7"),
       tileFinder: lowSaturation(THEMES[theme].grass[1], 0.6),
       fallen: new THREE.Color(lt[2]),
+      trunk: new THREE.Color(leafPalette === "custom" ? customTrunk : THEMES[theme].wood),
       lockLight: new THREE.Color("#F7F3EA"),
     };
-  }, [theme, tints, scan]);
+  }, [theme, tints, scan, leafPalette, customTrunk]);
 
   const cur = useRef({
     leaf: [new THREE.Color(), new THREE.Color(), new THREE.Color()],
     grass: [new THREE.Color(), new THREE.Color()],
     fallen: new THREE.Color(),
+    trunk: new THREE.Color(),
     tileFinder: new THREE.Color(),
     ready: false,
   });
@@ -373,6 +453,7 @@ function LivingScene({
     cur.current.leaf.forEach((c, i) => c.copy(target.leaf[i]));
     cur.current.grass.forEach((c, i) => c.copy(target.grass[i]));
     cur.current.fallen.copy(target.fallen);
+    cur.current.trunk.copy(target.trunk);
     cur.current.tileFinder.copy(target.tileFinder);
     cur.current.ready = true;
   }
@@ -464,13 +545,29 @@ function LivingScene({
       [grass.current, tree.grass.length],
       [fallen.current, 90],
       [rain.current, RAIN_MAX],
+      [perchBirds.current, 10],
+      [birdBodies.current, birdCount],
+      [butterflies.current, Math.max(2, butterflyCount * 2)],
+      [butterflyBodies.current, butterflyCount],
     ] as const) {
       if (!mesh) continue;
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3).fill(1), 3);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     }
-  }, [tree, model.size]);
+  }, [tree, model.size, butterflyCount, birdCount]);
+
+  useEffect(() => {
+    const reset = () => {
+      rotation.current.current = 0;
+      rotation.current.target = 0;
+      rotation.current.saved = 0;
+      rotation.current.velocity = 0;
+      rotation.current.idle = 0;
+    };
+    window.addEventListener("linkforge:reset-living-view", reset);
+    return () => window.removeEventListener("linkforge:reset-living-view", reset);
+  }, [rotation]);
 
   useFrame((_, deltaRaw) => {
     if (!active && inspectProgress === undefined) return;
@@ -478,7 +575,10 @@ function LivingScene({
     const { d, color, q, end, e, dir, look, up } = scratch;
 
     const wanted = view === "scan" ? 1 : 0;
-    if (previousView.current !== view) previousView.current = view;
+    if (previousView.current !== view) {
+      if (view === "scan") rotation.current.saved = rotation.current.target;
+      previousView.current = view;
+    }
 
     const p =
       inspectProgress === undefined
@@ -502,6 +602,21 @@ function LivingScene({
       onSettled(p === 1);
     }
     gl.domElement.dataset.reveal = p.toFixed(4);
+    const rot = rotation.current;
+    if (p < 0.001 && !rot.dragging && !reduced) {
+      rot.idle += delta;
+      if (rot.idle > 5) rot.velocity += delta * 0.002;
+    }
+    if (!rot.dragging) {
+      rot.target += rot.velocity;
+      rot.velocity *= 0.92;
+    }
+    const targetRotation = view === "scan" ? 0 : rot.saved;
+    const rotationMix = view === "scan" ? ease(clamp01(p / 0.35)) : ease(1 - clamp01(p / 0.35));
+    if (view === "scan") rot.target = THREE.MathUtils.lerp(rot.target, 0, rotationMix * 0.18);
+    else if (p > 0.001) rot.target = THREE.MathUtils.lerp(0, targetRotation, rotationMix);
+    rot.current = THREE.MathUtils.lerp(rot.current, rot.target, reduced ? 1 : 0.18);
+    if (worldGroup.current) worldGroup.current.rotation.y = p > 0.985 ? 0 : rot.current;
 
     const preview = inspectProgress !== undefined;
     build.current = preview ? 1 : Math.min(1, build.current + delta / 1.5);
@@ -542,6 +657,8 @@ function LivingScene({
     cur.current.leaf.forEach((c, i) => c.lerp(target.leaf[i], cLerp));
     cur.current.grass.forEach((c, i) => c.lerp(target.grass[i], cLerp));
     cur.current.fallen.lerp(target.fallen, cLerp);
+    cur.current.trunk.lerp(target.trunk, cLerp);
+    resources.wm.color.copy(cur.current.trunk);
     cur.current.tileFinder.lerp(target.tileFinder, cLerp);
 
     /* ---- trunk + branches: scale-y → 0 into the platform by 0.30 ---- */
@@ -594,19 +711,25 @@ function LivingScene({
       const flapFast = reduced ? 0 : Math.sin(bs.clock * TAU * 4);
       for (let i = 0; i < perch.length; i++) {
         const pc = perch[i];
-        let bx = pc.pos[0];
-        let by = pc.pos[1];
-        let bz = pc.pos[2];
+        const loop = ((bs.clock + i * 4.7) % 18) / 18;
+        const orbit = loop * TAU + pc.phase;
+        const flyX = Math.cos(orbit) * tree.canopyRadius * 0.9;
+        const flyZ = Math.sin(orbit) * tree.canopyRadius * 0.9;
+        const flyY = tree.height * (0.62 + 0.12 * Math.sin(orbit * 2));
+        let bx = flyX;
+        let by = flyY;
+        let bz = flyZ;
         let sc = 1;
-        let flap = 0.14;
+        let flap = flapFast * 0.75;
         let tilt = 0;
+        let yaw = orbit + Math.PI / 2;
         if (reduced) {
           sc = p < 0.5 ? 1 : 0;
         } else if (p > 0.001 && bs.returnClock < 0) {
           const to = clamp01((seconds - i * 0.04) / 0.4);
-          bx += pc.dir[0] * to * 7;
-          by += pc.dir[1] * to * 7;
-          bz += pc.dir[2] * to * 7;
+          bx = THREE.MathUtils.lerp(bx, bx + pc.dir[0] * 7, to);
+          by = THREE.MathUtils.lerp(by, by + pc.dir[1] * 7, to);
+          bz = THREE.MathUtils.lerp(bz, bz + pc.dir[2] * 7, to);
           sc = 1 - to;
           flap = flapFast * 0.9;
         } else if (bs.returnClock >= 0) {
@@ -624,24 +747,90 @@ function LivingScene({
             flap = rt < 1 ? flapFast * 0.6 : 0.14;
           }
         } else {
-          bs.turns[i] -= delta;
-          if (bs.turns[i] < 0) {
-            if (bs.turns[i] < -0.2) bs.turns[i] = 8 + rng() * 7;
-            else tilt = 0.3;
+          if (loop > 0.5 && loop < 0.62) {
+            const a = ease((loop - 0.5) / 0.12);
+            bx = THREE.MathUtils.lerp(flyX, pc.pos[0], a);
+            by = THREE.MathUtils.lerp(flyY, pc.pos[1] + 0.12, a);
+            bz = THREE.MathUtils.lerp(flyZ, pc.pos[2], a);
+            flap = flapFast * (1 - a);
+          } else if (loop >= 0.62 && loop < 0.86) {
+            bx = pc.pos[0];
+            by = pc.pos[1] + 0.12;
+            bz = pc.pos[2];
+            flap = 0.08;
+            tilt = 0.08;
+            yaw = pc.phase;
+          } else if (loop >= 0.86) {
+            const a = ease((loop - 0.86) / 0.14);
+            bx = THREE.MathUtils.lerp(pc.pos[0], flyX, a);
+            by = THREE.MathUtils.lerp(pc.pos[1] + 0.12, flyY, a);
+            bz = THREE.MathUtils.lerp(pc.pos[2], flyZ, a);
+            flap = flapFast * a;
           }
-          flap = 0.14 + Math.sin(bs.clock * 0.6 + pc.phase) * 0.03;
         }
         for (let w = 0; w < 2; w++) {
           d.position.set(bx, by, bz);
-          d.rotation.set(tilt, pc.phase + (w ? Math.PI : 0), (w ? -1 : 1) * flap);
-          d.scale.setScalar(Math.max(0.0001, sc * 0.9));
+          d.rotation.set(tilt, yaw + (w ? Math.PI : 0), (w ? -1 : 1) * flap);
+          d.scale.setScalar(Math.max(0.0001, sc * 2.1));
           d.updateMatrix();
           perchBirds.current.setMatrixAt(i * 2 + w, d.matrix);
+        }
+        if (birdBodies.current) {
+          d.position.set(bx, by, bz);
+          d.rotation.set(tilt, yaw, 0);
+          d.scale.set(Math.max(0.0001, sc * 0.34), Math.max(0.0001, sc * 0.2), Math.max(0.0001, sc * 0.2));
+          d.updateMatrix();
+          birdBodies.current.setMatrixAt(i, d.matrix);
         }
       }
       perchBirds.current.count = perch.length * 2;
       perchBirds.current.instanceMatrix.needsUpdate = true;
       perchBirds.current.visible = growth > 0.4;
+      if (birdBodies.current) {
+        birdBodies.current.count = perch.length;
+        birdBodies.current.instanceMatrix.needsUpdate = true;
+        birdBodies.current.visible = growth > 0.4 && p < 0.3;
+      }
+    }
+
+    if (butterflies.current) {
+      butterflies.current.visible = p < 0.3 && growth > 0.45;
+      const fade = 1 - ease(clamp01(p / 0.3));
+      for (let i = 0; i < butterflyData.length; i++) {
+        const b = butterflyData[i];
+        const a = time.current * TAU * b.speed + b.phase;
+        const x = Math.cos(a) * b.radius + Math.sin(a * 2.1) * 0.7;
+        const z = Math.sin(a) * b.radius + Math.cos(a * 1.7) * 0.7;
+        const y = b.height + Math.sin(a * 3) * b.bob;
+        const heading = -a + Math.PI / 2;
+        const flap = reduced ? 0.2 : Math.sin(time.current * TAU * (5 + b.tint * 3) + b.phase) * 0.75;
+        for (let w = 0; w < 2; w++) {
+          d.position.set(x, y, z);
+          d.rotation.set(0, heading + (w ? Math.PI : 0), (w ? -1 : 1) * flap);
+          d.scale.setScalar(Math.max(0.0001, fade * 1.15));
+          d.updateMatrix();
+          butterflies.current.setMatrixAt(i * 2 + w, d.matrix);
+          color.set(b.tint < 0.34 ? "#F7F3EA" : b.tint < 0.67 ? THEMES[theme].accent : "#F2B866");
+          butterflies.current.setColorAt(i * 2 + w, color);
+        }
+        if (butterflyBodies.current) {
+          d.position.set(x, y, z);
+          d.rotation.set(0, heading, 0);
+          d.scale.set(Math.max(0.0001, fade * 0.13), Math.max(0.0001, fade * 0.08), Math.max(0.0001, fade * 0.24));
+          d.updateMatrix();
+          butterflyBodies.current.setMatrixAt(i, d.matrix);
+          butterflyBodies.current.setColorAt(i, color.set("#2B2630"));
+        }
+      }
+      butterflies.current.count = butterflyData.length * 2;
+      butterflies.current.instanceMatrix.needsUpdate = true;
+      if (butterflies.current.instanceColor) butterflies.current.instanceColor.needsUpdate = true;
+      if (butterflyBodies.current) {
+        butterflyBodies.current.count = butterflyData.length;
+        butterflyBodies.current.visible = butterflies.current.visible;
+        butterflyBodies.current.instanceMatrix.needsUpdate = true;
+        if (butterflyBodies.current.instanceColor) butterflyBodies.current.instanceColor.needsUpdate = true;
+      }
     }
 
     if (atEnd) return;
@@ -896,14 +1085,8 @@ function LivingScene({
   });
 
   return (
-    <group
-      onPointerDown={(event) => {
-        if (onToggle) {
-          event.stopPropagation();
-          onToggle();
-        }
-      }}
-    >
+    <group>
+      <group ref={worldGroup}>
       <group ref={art}>
         <mesh ref={slab} geometry={resources.slab} material={resources.sm} />
         <mesh ref={ground} geometry={resources.plate} material={resources.base} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} />
@@ -914,11 +1097,21 @@ function LivingScene({
         <instancedMesh ref={fallen} args={[resources.leaf, resources.fm, 90]} frustumCulled={false} />
         <instancedMesh ref={rain} args={[resources.rain, resources.rm, RAIN_MAX]} frustumCulled={false} />
         <instancedMesh ref={perchBirds} args={[resources.bird, resources.birdMat, 10]} frustumCulled={false} />
+        <instancedMesh ref={birdBodies} args={[undefined, undefined, birdCount]} frustumCulled={false}>
+          <sphereGeometry args={[1, 8, 6]} />
+          <meshBasicMaterial color="#23273A" toneMapped={false} />
+        </instancedMesh>
+        <instancedMesh ref={butterflies} args={[resources.bird, resources.butterflyMat, Math.max(2, butterflyCount * 2)]} frustumCulled={false} />
+        <instancedMesh ref={butterflyBodies} args={[undefined, undefined, butterflyCount]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshBasicMaterial vertexColors toneMapped={false} />
+        </instancedMesh>
       </group>
       <group ref={flat} visible={false}>
         <mesh geometry={resources.plate} material={resources.base} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} />
         <primitive object={flatRender.base} />
         <primitive object={flatRender.data} />
+      </group>
       </group>
     </group>
   );

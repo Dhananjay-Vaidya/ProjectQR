@@ -6,11 +6,8 @@
  * worlds. Mode is still driven by ?mode= via ModeFromQuery.
  */
 
-import { useEditorStore } from "@/stores/editorStore";
 import { Editor } from "@/components/editor/Editor";
-import { LivingSection } from "@/components/living/LivingSection";
 
 export function CreateExperience() {
-  const renderer = useEditorStore((s) => s.renderer);
-  return renderer === "living" ? <LivingSection /> : <Editor />;
+  return <Editor />;
 }

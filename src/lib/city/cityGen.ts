@@ -67,8 +67,8 @@ export interface CityModel {
   lamps: { x: number; z: number }[];
   maxHeight: number;
   cars: { run: number; t: number; dir: 1 | -1; lane: number; color: number; speed: number }[];
-  birds: { count: number; radius: number; altitude: number; lapSeconds: number; phases: number[] };
-  plane: { angle: number; altitude: number; speed: number; firstDelay: number };
+  birds: { count: number; radius: number; altitude: number; lapSeconds: number; phases: number[]; flockTimer: number; flockEdge: number };
+  plane: { angle: number; altitude: number; speed: number; firstDelay: number; nextDelay: number };
 }
 
 const TAU = Math.PI * 2;
@@ -231,12 +231,15 @@ export function generateCity(model: QRModel, mobile = false): CityModel {
     altitude: maxHeight * 1.4,
     lapSeconds: 40,
     phases: Array.from({ length: birdCount }, (_, i) => (i / birdCount) * TAU + mRng() * 0.4),
+    flockTimer: 30 + mRng() * 40,
+    flockEdge: Math.floor(mRng() * 4),
   };
   const plane = {
     angle: mRng() * TAU,
     altitude: maxHeight * 1.9,
     speed: 6,
     firstDelay: 20 + mRng() * 40,
+    nextDelay: 75 + mRng() * 45,
   };
 
   return {

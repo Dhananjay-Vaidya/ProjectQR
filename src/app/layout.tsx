@@ -2,6 +2,7 @@
 import { Bricolage_Grotesque, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AudioProvider } from "@/components/audio/AudioProvider";
+import { AppShell } from "@/components/shell/AppShell";
 
 /**
  * One family for the whole site: Bricolage Grotesque (variable). Geist Mono is
@@ -35,7 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${bricolage.variable} ${geistMono.variable}`}>
-        <AudioProvider>{children}</AudioProvider>
+        <AudioProvider><AppShell>{children}</AppShell></AudioProvider>
       </body>
     </html>
   );

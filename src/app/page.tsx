@@ -1,100 +1,22 @@
-﻿"use client";
-
-import Link from "next/link";
 import { HeroPreview } from "@/components/landing/HeroPreview";
 import { ExperienceShelf } from "@/components/landing/ExperienceShelf";
-import { AudioControl } from "@/components/audio/AudioControl";
 
-const STARTERS = [
-  { href: "/create", title: "Create", text: "Build a scannable 3D QR world from any URL." },
-  { href: "/verify", title: "Verify", text: "Check a downloaded code before sharing or printing." },
-  { href: "/create?mode=city", title: "City", text: "Turn dark modules into a miniature skyline." },
-  { href: "/create?mode=particle", title: "Particles", text: "Use a kinetic sculpture that assembles into a QR." },
-];
-
-const PROOF = [
-  ["4", "living render styles"],
-  ["3", "seasonal themes"],
-  ["1", "verified QR export"],
+const FAQ = [
+  ["Does it work with any link?", "It works with valid web URLs that fit within the QR code's error-correction capacity."],
+  ["Will it scan when printed?", "Yes. Every exported PNG is decoded with jsQR before it downloads."],
+  ["Can I use my own colours?", "Themes change the world presentation while the verified scan path preserves QR contrast."],
+  ["Is my link stored?", "No. LinkForge builds the QR in your browser."],
+  ["Can I change the destination later?", "Not yet. A QR code always contains the exact destination used to create it."],
+  ["Which phones can scan it?", "Any current phone camera or QR reader that supports standard QR codes."],
 ];
 
 export default function Home() {
-  return (
-    <main className="lf-home">
-      <header className="lf-home__nav" aria-label="Primary navigation">
-        <Link href="/" className="lf-home__brand lf-focus">
-          <span className="lf-home__mark" aria-hidden="true">LF</span>
-          <span>LinkForge</span>
-        </Link>
-        <div className="lf-home__actions"><nav className="lf-home__links">
-          <Link href="/create" className="lf-focus">Create</Link>
-          <Link href="/create?mode=living" className="lf-focus">Living</Link>
-          <Link href="/create?mode=city" className="lf-focus">City</Link>
-          <Link href="/verify" className="lf-focus">Verify</Link>
-        </nav>
-          <AudioControl />
-        </div>
-      </header>
-
-      <HeroPreview />
-
-      <section className="lf-home__start" aria-labelledby="lf-home-start-title">
-        <div>
-          <p className="lf-home__eyebrow">Start here</p>
-          <h2 id="lf-home-start-title">Choose what you want to do.</h2>
-        </div>
-        <div className="lf-home__starter-grid">
-          {STARTERS.map((item) => (
-            <Link key={item.href} href={item.href} className="lf-home__starter lf-focus">
-              <span>{item.title}</span>
-              <small>{item.text}</small>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <ExperienceShelf />
-
-      <section className="lf-home__proof" aria-label="LinkForge capabilities">
-        {PROOF.map(([number, label]) => (
-          <div key={label} className="lf-home__proof-item">
-            <strong>{number}</strong>
-            <span>{label}</span>
-          </div>
-        ))}
-        <div className="lf-home__audio">
-          <span>Ambient room tone available from the header control</span>
-        </div>
-      </section>
-
-      <section className="lf-home__how">
-        <div className="lf-home__step">
-          <p className="lf-step__rule">1</p>
-          <p>Paste a link.</p>
-        </div>
-        <div className="lf-home__step">
-          <p className="lf-step__rule">2</p>
-          <p>Pick a world and theme.</p>
-        </div>
-        <div className="lf-home__step">
-          <p className="lf-step__rule">3</p>
-          <p>Tap to reveal the QR and download.</p>
-        </div>
-      </section>
-
-      <footer className="lf-home__footer lf-ui-sm">
-        <span>LinkForge</span>
-        <Link href="/create" className="lf-focus" style={{ color: "var(--lf-ink)" }}>
-          Create
-        </Link>
-        <Link href="/verify" className="lf-focus" style={{ color: "var(--lf-ink)" }}>
-          Verify a code
-        </Link>
-      </footer>
-    </main>
-  );
+  return <main className="landing-page">
+    <HeroPreview />
+    <section className="landing-section"><h2>Four worlds from one link</h2><ExperienceShelf /></section>
+    <section className="landing-section landing-steps"><h2>How it works</h2><div><p><b>1</b> Paste a link</p><p><b>2</b> Pick a world and a theme</p><p><b>3</b> Tap to reveal the QR and download</p></div></section>
+    <section className="landing-section landing-proof"><h2>Why it scans</h2><div><p><i>▦</i>The real QR matrix is the source of truth.</p><p><i>⌘</i>Finder patterns and quiet zone are never decorated.</p><p><i>✓</i>Every download is decoded with jsQR before you get it.</p></div></section>
+    <section className="landing-section landing-determinism"><h2>Same link, same world</h2><p>Each world is derived deterministically from the URL. The same destination creates the same geometry every time, while another link grows a distinct world.</p><div aria-hidden="true"><span>https://example.com</span><span>https://linkforge.app</span></div></section>
+    <section className="landing-section landing-faq"><h2>FAQ</h2>{FAQ.map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</section>
+  </main>;
 }
-
-
-
-

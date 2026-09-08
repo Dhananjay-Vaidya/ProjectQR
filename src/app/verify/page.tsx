@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { VerifySuite } from "@/components/verify/VerifySuite";
 
 export const metadata: Metadata = {
@@ -21,9 +20,6 @@ export default function VerifyPage() {
         }}
       >
         <header style={{ display: "grid", gap: 8 }}>
-          <Link href="/" className="lf-ui-sm lf-focus" style={{ color: "var(--lf-muted)" }}>
-            LinkForge
-          </Link>
           <h1 className="lf-display" style={{ margin: 0, fontSize: 36 }}>
             Verify a code
           </h1>

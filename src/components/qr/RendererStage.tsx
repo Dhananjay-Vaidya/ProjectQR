@@ -52,12 +52,14 @@ export interface RendererStageProps {
   logoDataUrl: string | null;
   logoAreaFraction: number;
   cityRoofDetail: boolean;
+  cityTime?: "day" | "night";
   particleState: "assembled" | "scattered";
   particleCount: number;
   mosaicImageDataUrl: string | null;
   mosaicSafeMode: boolean;
   leafPalette?: LeafPaletteName;
   customLeafColors?: [string, string, string];
+  customTrunk?: string;
 }
 
 const RendererStage = forwardRef<RendererHandle, RendererStageProps>(
@@ -79,12 +81,14 @@ const RendererStage = forwardRef<RendererHandle, RendererStageProps>(
       logoDataUrl,
       logoAreaFraction,
       cityRoofDetail,
+      cityTime = "day",
       particleState,
       particleCount,
       mosaicImageDataUrl,
       mosaicSafeMode,
       leafPalette,
       customLeafColors,
+      customTrunk,
     } = props;
 
     switch (mode) {
@@ -122,6 +126,7 @@ const RendererStage = forwardRef<RendererHandle, RendererStageProps>(
             sizePx={sizePx}
             view={experienceView === "scan" ? "scan" : "explore"}
             roofDetail={cityRoofDetail}
+            cityTime={cityTime}
             studioPreview={studioPreview}
             growNonce={buildNonce}
             theme={theme}
@@ -159,6 +164,7 @@ const RendererStage = forwardRef<RendererHandle, RendererStageProps>(
             theme={theme}
             leafPalette={leafPalette}
             customLeafColors={customLeafColors}
+            customTrunk={customTrunk}
             buildNonce={buildNonce}
             hero={hero}
             onToggleView={onToggleView}

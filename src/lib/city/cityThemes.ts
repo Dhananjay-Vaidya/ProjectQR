@@ -125,3 +125,31 @@ export const CITY_THEMES: Record<ThemeName, CityTheme> = {
 export function cityTheme(name: ThemeName): CityTheme {
   return CITY_THEMES[name];
 }
+
+export const CITY_TIME_THEMES: Record<"day" | "night", CityTheme> = {
+  day: {
+    ...CITY_THEMES.verdant,
+    litColors: ["#6A716D", "#F2B866"],
+    litFraction: 0.08,
+    windowEmissive: 0.08,
+    stageBg: "linear-gradient(180deg, #F7F3EA 0%, #E9F3F6 100%)",
+  },
+  night: {
+    ...CITY_THEMES.neon,
+    facades: ["#28343A", "#223036", "#1B282E"],
+    roof: "#10191F",
+    glass: "#071015",
+    litColors: ["#FFD78A", "#A8D3FF"],
+    litFraction: 0.62,
+    windowEmissive: 1.35,
+    flickerFraction: 0.08,
+    street: "#132025",
+    streetDash: "#273940",
+    plaza: "#0D171A",
+    lampColor: "#F2B866",
+    keyIntensity: 0.32,
+    ambientIntensity: 0.38,
+    hemiIntensity: 0.28,
+    stageBg: "linear-gradient(180deg, #09120F 0%, #111A22 100%)",
+  },
+};

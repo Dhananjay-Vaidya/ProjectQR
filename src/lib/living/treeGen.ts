@@ -128,6 +128,16 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
     const rx = (2.0 + foliage() * 0.8) * scale;
     clusters.push({ center, radius: [rx, rx * 0.62, rx], phase: foliage() * TAU });
   };
+  const addLeafMass = (center: Vec3, scale = 1) => {
+    addCluster(center, scale);
+    const satellites = mobile ? 2 : 4;
+    for (let s = 0; s < satellites; s++) {
+      const a = foliage() * TAU;
+      const lift = (foliage() - 0.35) * scale;
+      const offset = (0.75 + foliage() * 1.25) * scale;
+      addCluster([center[0] + Math.cos(a) * offset, center[1] + lift, center[2] + Math.sin(a) * offset], scale * (0.42 + foliage() * 0.28));
+    }
+  };
 
   const primaryCount = 4 + Math.floor(structure() * 3); // 4, 5 or 6
   const baseAz = structure() * TAU;
@@ -152,10 +162,10 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
     branches.push({ from, to, baseRadius: 0.24, tipRadius: 0.08, primary: true, overreach });
 
     if (overreach) {
-      addCluster(to, 0.45);
+      addLeafMass(to, 0.45);
     } else {
-      addCluster(to);
-      addCluster(mix(from, to, 0.62)); // outer 45% of the branch
+      addLeafMass(to);
+      addLeafMass(mix(from, to, 0.62), 0.72); // outer 45% of the branch
     }
 
     const secondaries = 1 + Math.floor(structure() * 3); // 1–3
@@ -170,12 +180,12 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
       ];
       branches.push({ from: start, to: end, baseRadius: 0.1, tipRadius: 0.035, primary: false });
       if (!overreach) {
-        addCluster(end, 0.85);
-        addCluster(mix(start, end, 0.72), 0.7);
+        addLeafMass(end, 0.82);
+        addCluster(mix(start, end, 0.72), 0.62);
       }
     }
   }
-  addCluster(top, 0.7);
+  addLeafMass(top, 0.82);
 
   /* ---- module inventory ---- */
   const modules: { row: number; col: number; x: number; z: number; free: number }[] = [];
@@ -199,7 +209,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
     }
   }
 
-  const target = mobile ? 1500 : 3200;
+  const target = mobile ? 1800 : 6200;
   const k = Math.max(3, Math.round(target / Math.max(1, modules.length)));
   modules.forEach((m) => (m.free = k));
 
@@ -284,8 +294,8 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
 
   /* ---- grass: finder tufts + sparse outer band + a dense ring around the trunk ---- */
   const grass: GroundCard[] = [];
-  const grassCap = mobile ? 400 : 900;
-  const perFinder = mobile ? 3 : 4;
+  const grassCap = mobile ? 1000 : 3000;
+  const perFinder = mobile ? 2 : 3;
   for (const p of finderDark) {
     for (let b = 0; b < perFinder && grass.length < grassCap; b++) {
       grass.push({
@@ -297,7 +307,26 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
       });
     }
   }
-  const outerStride = Math.max(1, Math.floor(outerLight.length / (mobile ? 30 : 70)));
+  // Light, non-protected modules become the garden's middle ground. The seeded
+  // threshold leaves deliberate open paths, while the centre and perimeter get
+  // richer clusters without ever covering QR function patterns.
+  for (const p of lightModules) {
+    if (grass.length >= grassCap || decor() > 0.58) continue;
+    const radial = Math.hypot(p[0], p[2]);
+    const blades = radial < 3.8 ? (mobile ? 3 : 5) : (mobile ? 1 : 2);
+    for (let b = 0; b < blades && grass.length < grassCap; b++) {
+      const roll = decor();
+      grass.push({
+        position: [p[0] + (decor() - 0.5) * 0.72, 0.1, p[2] + (decor() - 0.5) * 0.72],
+        yaw: decor() * TAU,
+        tint: decor() < 0.56 ? 0 : 1,
+        h: roll < 0.55 ? 0.62 : roll < 0.9 ? 0.9 : 1.18,
+        accent: decor() < 0.045,
+        pink: decor() < 0.035,
+      });
+    }
+  }
+  const outerStride = Math.max(1, Math.floor(outerLight.length / (mobile ? 90 : 220)));
   for (let i = 0; i < outerLight.length && grass.length < grassCap; i += outerStride) {
     const p = outerLight[i];
     grass.push({
@@ -308,7 +337,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   }
   // Base ring: ~6 tufts per light module in the 1.5–3.5-module annulus, taller
   // near the trunk (0.7) tapering to 0.4 at the ring edge.
-  const perRing = mobile ? 4 : 6;
+  const perRing = mobile ? 9 : 18;
   for (const p of ringLight) {
     const radial = Math.hypot(p[0], p[2]);
     const hUnits = 0.7 - ((radial - 1.5) / 2) * 0.3; // 0.7 → 0.4

@@ -32,6 +32,8 @@ export type ExperienceView = "experience" | "scan";
 export interface CityConfig {
   /** Explore (orbit) vs Scan (orthographic top-down). Export always uses scan. */
   view: "explore" | "scan";
+  /** Presentation-only city environment. Does not affect QR data or geometry. */
+  time: "day" | "night";
   /** Roof decoration on non-protected buildings. */
   roofDetail: boolean;
   /** Nonce that replays the city-growth wave. Identity is unchanged. */
@@ -63,8 +65,13 @@ export interface LivingConfig {
   foliageIntensity: number;
   /** Cosmetic canopy palette. Scan/export contrast remains theme-verified. */
   leafPalette: LeafPaletteName;
-  /** User-selected canopy colours used when leafPalette is "custom". */
-  customLeafColors: [string, string, string];
+  /** User-selected presentation colours used when leafPalette is "custom". */
+  customTreePalette: {
+    leafPrimary: string;
+    leafSecondary: string;
+    leafAccent: string;
+    trunk: string;
+  };
 }
 
 export interface EditorState {
@@ -200,15 +207,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   buildNonce: 0,
   exportResolution: 2048,
 
-  city: { view: "explore", roofDetail: true, growNonce: 0 },
-  particle: { state: "assembled", particleCount: 8000 },
+  city: { view: "explore", time: "day", roofDetail: true, growNonce: 0 },
+  particle: { state: "scattered", particleCount: 8000 },
   mosaic: { safeMode: true, imageDataUrl: null, imageError: null },
   living: {
     view: "experience",
     growNonce: 0,
     foliageIntensity: 1,
     leafPalette: "theme",
-    customLeafColors: ["#a8d86f", "#4ea86e", "#d39b54"],
+    customTreePalette: {
+      leafPrimary: "#5F8A52",
+      leafSecondary: "#8FA66A",
+      leafAccent: "#D6B767",
+      trunk: "#5C3A27",
+    },
   },
   logo: { dataUrl: null, areaFraction: 0.16 },
 

@@ -18,9 +18,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import type { QRColors, QRModel } from "@/types/qr";
 import { captureCanvas, type ExportedImage } from "@/lib/export";
@@ -28,14 +28,15 @@ import type { RendererHandle, RendererProps } from "@/components/qr/types";
 import { usePrefersReducedMotion, useSceneActive } from "@/lib/hooks";
 import { detectQuality } from "@/lib/renderQuality";
 import type { ThemeName } from "@/lib/living/themes";
-import { cityTheme, type CityTheme } from "@/lib/city/cityThemes";
-import { generateCity, BUILDING_WIDTH, type CityModel } from "@/lib/city/cityGen";
-import { applyWindowShader, makeWindowUniforms } from "@/lib/city/cityWindows";
+import { CITY_TIME_THEMES, cityTheme, type CityTheme } from "@/lib/city/cityThemes";
+import { generateCity, type CityModel } from "@/lib/city/cityGen";
+import { makeWindowUniforms } from "@/lib/city/cityWindows";
 import { birdWingGeometry, lampGeometry, planeGeometry, plazaTreeGeometry } from "@/lib/city/cityMeshes";
 
 export interface CityQRProps extends RendererProps {
   view: "explore" | "scan";
   roofDetail: boolean;
+  cityTime?: "day" | "night";
   growNonce?: number;
   theme?: ThemeName;
   onToggleView?: () => void;
@@ -43,9 +44,20 @@ export interface CityQRProps extends RendererProps {
 }
 
 const CAR_COLORS = ["#8a8f9c", "#9c8a7e", "#7e8a80", "#6f7486"];
+interface RotationControl {
+  current: number;
+  target: number;
+  velocity: number;
+  dragging: boolean;
+  lastX: number;
+  startX: number;
+  saved: number;
+  idle: number;
+  moved: boolean;
+}
 
 const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
-  { model, colors, sizePx, view, roofDetail, growNonce = 0, theme = "verdant", onToggleView, onReady, onWebglError },
+  { model, colors, sizePx, view, roofDetail, cityTime = "day", growNonce = 0, theme = "verdant", onToggleView, onReady, onWebglError },
   ref,
 ) {
   const active = useSceneActive<HTMLDivElement>();
@@ -54,7 +66,10 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const [exportSignal, setExportSignal] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [didDrag, setDidDrag] = useState(false);
   const exportResolve = useRef<((img: ExportedImage) => void) | null>(null);
+  const rotation = useRef<RotationControl>({ current: 0, target: 0, velocity: 0, dragging: false, lastX: 0, startX: 0, saved: 0, idle: 0, moved: false });
 
   const doExport = useCallback(
     (): Promise<ExportedImage> =>
@@ -71,27 +86,67 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
     [doExport],
   );
 
-  const ct = cityTheme(theme);
-  const nightBg = view === "explore" && ct.stageBg ? ct.stageBg : null;
+  const ct = CITY_TIME_THEMES[cityTime] ?? cityTheme(theme);
+  const stageBg = view === "explore" && ct.stageBg ? ct.stageBg : null;
 
   return (
     <div
       ref={active.ref}
+      data-city-world
+      onPointerDown={(event) => {
+        if (view === "scan") return;
+        const rot = rotation.current;
+        rot.dragging = true;
+        rot.lastX = event.clientX;
+        rot.startX = event.clientX;
+        rot.velocity = 0;
+        rot.idle = 0;
+        rot.moved = false;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        setDragging(true);
+      }}
+      onPointerMove={(event) => {
+        const rot = rotation.current;
+        if (!rot.dragging || view === "scan") return;
+        const dx = event.clientX - rot.lastX;
+        rot.lastX = event.clientX;
+        rot.target += dx * 0.012;
+        rot.velocity = dx * 0.0012;
+        rot.saved = rot.target;
+        if (Math.abs(event.clientX - rot.startX) > 4) {
+          rot.moved = true;
+          if (!didDrag) setDidDrag(true);
+        }
+      }}
+      onPointerUp={(event) => {
+        const rot = rotation.current;
+        const wasClick = !rot.moved;
+        rot.dragging = false;
+        setDragging(false);
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+        if (wasClick && onToggleView) onToggleView();
+      }}
+      onPointerCancel={() => {
+        rotation.current.dragging = false;
+        setDragging(false);
+      }}
       style={{
         width: "100%",
         height: "100%",
         minHeight: sizePx,
-        cursor: onToggleView ? "pointer" : "default",
-        background: nightBg ?? "transparent",
-        borderRadius: nightBg ? 14 : 0,
-        transition: "background 500ms ease",
+        cursor: view === "scan" ? (onToggleView ? "pointer" : "default") : dragging ? "grabbing" : "grab",
+        background: stageBg ?? "transparent",
+        borderRadius: stageBg ? 14 : 0,
+        transition: "background 900ms ease",
+        position: "relative",
+        touchAction: "pan-y",
       }}
       role="img"
       aria-label={`City model for ${model.encodedUrl}, ${view === "scan" ? "scan view" : "experience view"}`}
     >
       <Canvas
         dpr={mobile ? [1, 1] : [1, 1.5]}
-        frameloop={active.active ? "always" : "demand"}
+        frameloop="always"
         gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
         orthographic
         camera={{ position: [0, 40, 0], zoom: 10, near: 0.1, far: 400 }}
@@ -99,24 +154,26 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
         onCreated={({ gl, scene }) => {
           glRef.current = gl;
           sceneRef.current = scene;
-          gl.setClearColor(new THREE.Color("#000000"), 0);
-          scene.background = null;
+          const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8");
+          gl.setClearColor(clear, 1);
+          scene.background = clear;
           onReady?.();
         }}
         onError={() =>
           onWebglError?.("3D rendering is unavailable on this device. Standard QR mode has been enabled.")
         }
-        onPointerMissed={onToggleView}
       >
         <CityScene
           model={model}
           colors={colors}
           view={view}
           roofDetail={roofDetail}
+          cityTime={cityTime}
           growNonce={growNonce}
           theme={theme}
           mobile={mobile}
           exportSignal={exportSignal}
+          rotation={rotation}
           onExported={() => {
             const gl = glRef.current;
             if (gl && exportResolve.current) {
@@ -126,6 +183,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
           }}
         />
       </Canvas>
+      {!didDrag && view === "explore" ? <span className="diorama-rotate-hint" aria-hidden="true">↻ Drag to rotate</span> : null}
     </div>
   );
 });
@@ -139,10 +197,12 @@ interface SceneProps {
   colors: QRColors;
   view: "explore" | "scan";
   roofDetail: boolean;
+  cityTime: "day" | "night";
   growNonce: number;
   theme: ThemeName;
   mobile: boolean;
   exportSignal: number;
+  rotation: RefObject<RotationControl>;
   onExported: () => void;
 }
 
@@ -173,7 +233,7 @@ function lerpTheme(a: CityTheme, b: CityTheme, t: number) {
   };
 }
 
-function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, exportSignal, onExported }: SceneProps) {
+function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme, mobile, exportSignal, rotation, onExported }: SceneProps) {
   const { gl, scene, camera, size } = useThree();
   const reduced = usePrefersReducedMotion();
   const city = useMemo<CityModel>(() => generateCity(model, mobile), [model, mobile]);
@@ -190,6 +250,7 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
   const lamps = useRef<THREE.InstancedMesh>(null);
   const cars = useRef<THREE.InstancedMesh>(null);
   const carLights = useRef<THREE.InstancedMesh>(null);
+  const windowDots = useRef<THREE.InstancedMesh>(null);
   const birds = useRef<THREE.InstancedMesh>(null);
   const plane = useRef<THREE.Group>(null);
   const contrail = useRef<THREE.Points>(null);
@@ -198,17 +259,43 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
   const keyLight = useRef<THREE.DirectionalLight>(null);
   const ambient = useRef<THREE.AmbientLight>(null);
   const hemi = useRef<THREE.HemisphereLight>(null);
+  const worldGroup = useRef<THREE.Group>(null);
+  const previousView = useRef(view);
 
   const uniforms = useMemo(() => makeWindowUniforms(), []);
-  const buildingMat = useMemo(
-    () => applyWindowShader(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 }), uniforms),
-    [uniforms],
-  );
+  const buildingMat = useMemo(() => new THREE.MeshBasicMaterial({ color: "#C6BFB0", toneMapped: false }), []);
   const exportMat = useMemo(() => new THREE.MeshBasicMaterial({ color: colors.foreground }), [colors.foreground]);
   const treeGeo = useMemo(() => plazaTreeGeometry(), []);
   const lampGeo = useMemo(() => lampGeometry(cityTheme(theme).lampColor), [theme]);
   const wingGeo = useMemo(() => birdWingGeometry(), []);
   const planeGeo = useMemo(() => planeGeometry(), []);
+  const windowData = useMemo(() => {
+    const dots: { x: number; y: number; z: number; rot: number; warm: boolean; lit: number; seed: number }[] = [];
+    const cap = mobile ? 520 : 1300;
+    for (const b of city.buildings) {
+      if (b.klass === "protected" || dots.length >= cap) continue;
+      const floors = Math.max(1, Math.floor(b.height / 0.35));
+      const cols = Math.max(1, Math.floor(Math.max(b.spanX, b.spanZ) / 0.32));
+      for (let f = 0; f < floors && dots.length < cap; f++) {
+        for (let c = 0; c < cols && dots.length < cap; c++) {
+          const h = ((b.seed * 0.000013 + f * 12.9898 + c * 78.233) % 1 + 1) % 1;
+          if (h > 0.72) continue;
+          const u = (c + 0.5) / cols - 0.5;
+          const side = h > 0.36;
+          dots.push({
+            x: b.x + (side ? Math.sign(Math.sin(b.seed)) * b.spanX * 0.505 : u * b.spanX * 0.72),
+            y: 0.26 + f * 0.35,
+            z: b.z + (side ? u * b.spanZ * 0.72 : Math.sign(Math.cos(b.seed)) * b.spanZ * 0.505),
+            rot: side ? Math.PI / 2 : 0,
+            warm: h < 0.58,
+            lit: h,
+            seed: b.seed + f * 37 + c * 101,
+          });
+        }
+      }
+    }
+    return dots;
+  }, [city, mobile]);
   useEffect(
     () => () => {
       buildingMat.dispose();
@@ -232,9 +319,10 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
   const grow = useRef(reduced ? 1 : 0);
   const clock = useRef(0);
   const themeT = useRef(1);
+  const scanProgress = useRef(view === "scan" ? 1 : 0);
   const fromTheme = useRef<ThemeName>(theme);
   const toThemeRef = useRef<ThemeName>(theme);
-  const flock = useRef({ mode: "circle" as "circle" | "away" | "back", timer: 30 + Math.random() * 40, edge: 0 });
+  const flock = useRef({ mode: "circle" as "circle" | "away" | "back", timer: city.birds.flockTimer, edge: city.birds.flockEdge });
   const planeState = useRef({ next: city.plane.firstDelay, active: false, u: 0 });
   const trailIdx = useRef(0);
   const trailAge = useRef<Float32Array>(new Float32Array(40));
@@ -243,7 +331,21 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
   useEffect(() => {
     grow.current = reduced ? 1 : 0;
     clock.current = 0;
+    scanProgress.current = view === "scan" ? 1 : 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [growNonce, model.encodedUrl, reduced]);
+
+  useEffect(() => {
+    const reset = () => {
+      rotation.current.current = 0;
+      rotation.current.target = 0;
+      rotation.current.saved = 0;
+      rotation.current.velocity = 0;
+      rotation.current.idle = 0;
+    };
+    window.addEventListener("linkforge:reset-city-view", reset);
+    return () => window.removeEventListener("linkforge:reset-city-view", reset);
+  }, [rotation]);
 
   // Start a 500ms colour + lit-fraction lerp whenever the theme changes.
   useEffect(() => {
@@ -257,7 +359,7 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
   /* ---- static population (geometry + base colours), once per model/theme ---- */
   useEffect(() => {
     const et = themeT.current * themeT.current * (3 - 2 * themeT.current);
-    const pal = lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), et);
+    const pal = CITY_TIME_THEMES[cityTime] ?? lerpTheme(cityTheme(fromTheme.current), cityTheme(theme), et);
 
     // buildings
     const bm = buildings.current;
@@ -266,7 +368,7 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
       for (let i = 0; i < city.buildings.length; i++) {
         const b = city.buildings[i];
         seeds[i] = b.klass === "protected" ? -1 : b.seed;
-        const h0 = reduced ? b.height : 0.0001;
+        const h0 = reduced ? b.height : Math.max(0.0001, b.height * grow.current);
         _d.position.set(b.x, h0 / 2, b.z);
         _d.rotation.set(0, 0, 0);
         _d.scale.set(b.spanX, h0, b.spanZ);
@@ -274,15 +376,10 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
         bm.setMatrixAt(i, _d.matrix);
         // Scan view previews the flat verified QR: every dark module renders in
         // colors.foreground, matching the export exactly.
-        bm.setColorAt(
-          i,
-          _c.set(view === "scan" ? colors.foreground : b.klass === "protected" ? pal.roof : pal.facades[b.toneIndex]),
-        );
       }
       bm.geometry.setAttribute("aSeed", new THREE.InstancedBufferAttribute(seeds, 1));
       bm.count = city.buildings.length;
       bm.instanceMatrix.needsUpdate = true;
-      if (bm.instanceColor) bm.instanceColor.needsUpdate = true;
     }
 
     // roof detail (setback / hvac / spire), all in one mesh
@@ -429,61 +526,37 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
     }
 
     // slab + lights
-    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(view === "scan" ? colors.background : pal.plaza);
-    if (ambient.current) ambient.current.intensity = view === "scan" ? 0.9 : pal.ambientIntensity;
-    if (hemi.current) hemi.current.intensity = view === "scan" ? 0.55 : pal.hemiIntensity;
+    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(pal.plaza);
+    if (ambient.current) ambient.current.intensity = pal.ambientIntensity;
+    if (hemi.current) hemi.current.intensity = pal.hemiIntensity;
     if (keyLight.current) {
       const el = (pal.keyElevationDeg * Math.PI) / 180;
       keyLight.current.position.set(Math.cos(el) * worldSize * 0.6, Math.sin(el) * worldSize * 0.7 + 2, worldSize * 0.25);
-      keyLight.current.intensity = view === "scan" ? 0.35 : pal.keyIntensity;
+      keyLight.current.intensity = pal.keyIntensity;
     }
 
     uniforms.uGlass.value.set(pal.glass);
     uniforms.uLitA.value.set(pal.litColors[0]);
     uniforms.uLitB.value.set(pal.litColors[1]);
-    uniforms.uLitFraction.value = view === "scan" ? 0 : pal.litFraction;
-    uniforms.uEmissive.value = view === "scan" ? 0 : pal.windowEmissive;
-    uniforms.uFlicker.value = view === "scan" || reduced ? 0 : pal.flickerFraction;
-  }, [city, theme, view, roofDetail, reduced, colors.background, colors.foreground, worldSize, roofCount, uniforms]);
-
-  /* ---- camera ---- */
-  useEffect(() => {
-    const cam = camera as THREE.OrthographicCamera;
-    const aspect = size.width / Math.max(1, size.height);
-    if (view === "scan") {
-      cam.position.set(0, worldSize, 0);
-      cam.up.set(0, 0, -1);
-      cam.lookAt(0, 0, 0);
-      cam.left = -half * aspect;
-      cam.right = half * aspect;
-      cam.top = half;
-      cam.bottom = -half;
-      cam.zoom = 1;
-    } else {
-      cam.position.set(worldSize * 0.72, worldSize * 0.46, worldSize * 0.84);
-      cam.up.set(0, 1, 0);
-      cam.lookAt(0, 0, 0);
-      cam.zoom = size.width < 760 ? 6.4 : 7.6;
-    }
-    cam.near = 0.1;
-    cam.far = worldSize * 6;
-    cam.updateProjectionMatrix();
-  }, [camera, view, worldSize, half, size.width, size.height]);
+    uniforms.uLitFraction.value = pal.litFraction;
+    uniforms.uEmissive.value = pal.windowEmissive;
+    uniforms.uFlicker.value = reduced ? 0 : pal.flickerFraction;
+  }, [city, theme, cityTime, reduced, worldSize, roofCount, uniforms]);
 
   useEffect(() => {
-    if (decor.current) decor.current.visible = view === "explore";
-    if (roofs.current) roofs.current.visible = view === "explore" && roofDetail;
-  }, [view, roofDetail]);
+    if (roofs.current) roofs.current.visible = roofDetail;
+  }, [roofDetail]);
 
   useEffect(() => {
     if (view === "scan") {
       gl.setClearColor(new THREE.Color(colors.background), 1);
       scene.background = new THREE.Color(colors.background);
     } else {
-      gl.setClearColor(0x000000, 0);
-      scene.background = null;
+      const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8");
+      gl.setClearColor(clear, 1);
+      scene.background = clear;
     }
-  }, [gl, scene, colors.background, view]);
+  }, [gl, scene, colors.background, view, cityTime]);
 
   /* ---- per-frame ---- */
   const animate = view === "explore" && !reduced;
@@ -491,23 +564,110 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
     const delta = Math.min(deltaRaw, 0.05);
     clock.current += animate ? delta : 0;
     uniforms.uTime.value = clock.current;
+    const wanted = view === "scan" ? 1 : 0;
+    if (previousView.current !== view) {
+      if (view === "scan") rotation.current.saved = rotation.current.target;
+      previousView.current = view;
+    }
+    scanProgress.current = reduced
+      ? wanted
+      : THREE.MathUtils.clamp(
+          scanProgress.current + Math.sign(wanted - scanProgress.current) * (delta / 1.05),
+          Math.min(scanProgress.current, wanted),
+          Math.max(scanProgress.current, wanted),
+        );
+    const p = scanProgress.current;
+    gl.domElement.dataset.cityReveal = p.toFixed(4);
+    const pSmooth = p * p * (3 - 2 * p);
+    const detailFade = 1 - THREE.MathUtils.smoothstep(p, 0.08, 0.42);
+    const envFade = 1 - THREE.MathUtils.smoothstep(p, 0.04, 0.28);
+    const pal = CITY_TIME_THEMES[cityTime] ?? cityTheme(theme);
+    const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8").lerp(new THREE.Color(colors.background), pSmooth);
+    gl.setClearColor(clear, 1);
+    scene.background = clear;
+    const rot = rotation.current;
+    if (p < 0.001 && !rot.dragging && !reduced) {
+      rot.idle += delta;
+      if (rot.idle > 5) rot.velocity += delta * 0.0015;
+    }
+    if (!rot.dragging) {
+      rot.target += rot.velocity;
+      rot.velocity *= 0.92;
+    }
+    const targetRotation = view === "scan" ? 0 : rot.saved;
+    const rotationMix = view === "scan" ? pSmooth : 1 - pSmooth;
+    if (view === "scan") rot.target = THREE.MathUtils.lerp(rot.target, 0, rotationMix * 0.2);
+    else if (p > 0.001) rot.target = THREE.MathUtils.lerp(0, targetRotation, rotationMix);
+    rot.current = THREE.MathUtils.lerp(rot.current, rot.target, reduced ? 1 : 0.18);
+    if (worldGroup.current) worldGroup.current.rotation.y = p > 0.985 ? 0 : rot.current;
+
+    const cam = camera as THREE.OrthographicCamera;
+    const aspect = size.width / Math.max(1, size.height);
+    const expPos = new THREE.Vector3(worldSize * 0.72, worldSize * 0.46, worldSize * 0.84);
+    const scanPos = new THREE.Vector3(0, worldSize, 0);
+    const expHalf = worldSize * (size.width < 760 ? 0.62 : 0.52);
+    const viewHalf = THREE.MathUtils.lerp(expHalf, half, pSmooth);
+    cam.position.copy(expPos).lerp(scanPos, pSmooth);
+    cam.up.set(0, 1 - pSmooth, -pSmooth).normalize();
+    cam.lookAt(0, 0, 0);
+    cam.left = -viewHalf * aspect;
+    cam.right = viewHalf * aspect;
+    cam.top = viewHalf;
+    cam.bottom = -viewHalf;
+    cam.zoom = 1;
+    cam.near = 0.1;
+    cam.far = worldSize * 6;
+    cam.updateProjectionMatrix();
+
+    if (ambient.current) ambient.current.intensity = THREE.MathUtils.lerp(pal.ambientIntensity, 0.9, pSmooth);
+    if (hemi.current) hemi.current.intensity = THREE.MathUtils.lerp(pal.hemiIntensity, 0.55, pSmooth);
+    if (keyLight.current) keyLight.current.intensity = THREE.MathUtils.lerp(pal.keyIntensity, 0.35, pSmooth);
+    if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.copy(_c.set(pal.plaza).lerp(new THREE.Color(colors.background), pSmooth));
+    uniforms.uLitFraction.value = THREE.MathUtils.lerp(pal.litFraction, 0, pSmooth);
+    uniforms.uEmissive.value = THREE.MathUtils.lerp(pal.windowEmissive, 0, pSmooth);
+    uniforms.uFlicker.value = p > 0.02 || reduced ? 0 : pal.flickerFraction;
+    if (windowDots.current) {
+      if (!windowDots.current.instanceColor) {
+        windowDots.current.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, windowData.length) * 3).fill(1), 3);
+        (windowDots.current.material as THREE.Material).needsUpdate = true;
+      }
+      const nightAmount = cityTime === "night" ? 1 : 0.12;
+      const visible = (1 - pSmooth) * nightAmount;
+      for (let i = 0; i < windowData.length; i++) {
+        const w = windowData[i];
+        const flicker = cityTime === "night" && !reduced ? 0.82 + 0.18 * Math.sin(clock.current * 1.7 + w.seed) : 1;
+        _d.position.set(w.x, w.y, w.z);
+        _d.rotation.set(0, w.rot, 0);
+        _d.scale.set(0.11, 0.16, Math.max(0.006, visible * 0.025));
+        _d.updateMatrix();
+        windowDots.current.setMatrixAt(i, _d.matrix);
+        _c.set(w.warm ? (w.lit < 0.4 ? "#FFD27A" : "#F2B65C") : "#AFCFFF").multiplyScalar(Math.max(0.18, visible * flicker));
+        windowDots.current.setColorAt(i, _c);
+      }
+      windowDots.current.count = p > 0.94 ? 0 : windowData.length;
+      windowDots.current.visible = p < 0.94;
+      windowDots.current.instanceMatrix.needsUpdate = true;
+      if (windowDots.current.instanceColor) windowDots.current.instanceColor.needsUpdate = true;
+    }
 
     // growth wave
     const bm = buildings.current;
-    if (bm && grow.current < 1) {
-      grow.current = Math.min(1, grow.current + delta / 1.8);
+    if (bm) {
+      if (grow.current < 1) grow.current = Math.min(1, grow.current + delta / 1.8);
       const g = grow.current;
       for (let i = 0; i < city.buildings.length; i++) {
         const b = city.buildings[i];
         const dist = Math.hypot(b.x, b.z) / (worldSize * 0.55);
         const local = THREE.MathUtils.clamp((g - dist * 0.5) / 0.4, 0, 1);
-        const h = Math.max(0.0001, b.height * (1 - (1 - local) ** 3));
+        const expH = Math.max(0.0001, b.height * (1 - (1 - local) ** 3));
+        const h = THREE.MathUtils.lerp(expH, 0.035, pSmooth);
         _d.position.set(b.x, h / 2, b.z);
-        _d.scale.set(b.spanX, h, b.spanZ);
+        _d.scale.set(THREE.MathUtils.lerp(b.spanX, 0.98, pSmooth), h, THREE.MathUtils.lerp(b.spanZ, 0.98, pSmooth));
         _d.rotation.set(0, 0, 0);
         _d.updateMatrix();
         bm.setMatrixAt(i, _d.matrix);
       }
+      (bm.material as THREE.MeshBasicMaterial).color.copy(_c.set(pal.facades[1]).lerp(new THREE.Color(colors.foreground), pSmooth));
       bm.instanceMatrix.needsUpdate = true;
     }
 
@@ -537,7 +697,11 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
       if (keyLight.current) keyLight.current.intensity = pal.keyIntensity;
     }
 
-    const ct = cityTheme(theme);
+    const ct = pal;
+    if (decor.current) decor.current.visible = envFade > 0.01;
+    if (decor.current) decor.current.scale.setScalar(Math.max(0.001, envFade));
+    if (roofs.current) roofs.current.visible = roofDetail && detailFade > 0.01;
+    if (roofs.current) roofs.current.scale.setScalar(Math.max(0.001, detailFade));
 
     // traffic
     const carM = cars.current;
@@ -586,9 +750,9 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
       const f = flock.current;
       if (animate) {
         f.timer -= delta;
-        if (f.mode === "circle" && f.timer <= 0) { f.mode = "away"; f.timer = 12; f.edge = Math.floor(Math.random() * 4); }
-        else if (f.mode === "away" && f.timer <= 0) { f.mode = "back"; f.timer = 6; f.edge = Math.floor(Math.random() * 4); }
-        else if (f.mode === "back" && f.timer <= 0) { f.mode = "circle"; f.timer = 90 + Math.random() * 60; }
+          if (f.mode === "circle" && f.timer <= 0) { f.mode = "away"; f.timer = 12; f.edge = (f.edge + 1) % 4; }
+        else if (f.mode === "away" && f.timer <= 0) { f.mode = "back"; f.timer = 6; }
+        else if (f.mode === "back" && f.timer <= 0) { f.mode = "circle"; f.timer = city.birds.flockTimer + 60; }
       }
       const lap = (clock.current * (Math.PI * 2)) / city.birds.lapSeconds;
       let cx = Math.cos(lap) * city.birds.radius;
@@ -633,7 +797,7 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
           if (ps.next <= 0) { ps.active = true; ps.u = 0; }
         } else {
           ps.u += (city.plane.speed * delta) / (worldSize * 2.4);
-          if (ps.u >= 1) { ps.active = false; ps.next = 75 + Math.random() * 45; }
+          if (ps.u >= 1) { ps.active = false; ps.next = city.plane.nextDelay; }
         }
       }
       pg.visible = ps.active || !animate;
@@ -680,10 +844,12 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
     const prevMat = bm.material;
     const prevDecor = decor.current?.visible ?? true;
     const prevRoofs = roofs.current?.visible ?? true;
+    const prevWorldRot = worldGroup.current?.rotation.y ?? 0;
     bm.material = exportMat;
     uniforms.uExport.value = 1;
     if (decor.current) decor.current.visible = false;
     if (roofs.current) roofs.current.visible = false;
+    if (worldGroup.current) worldGroup.current.rotation.y = 0;
 
     const prevSize = new THREE.Vector2();
     gl.getSize(prevSize);
@@ -712,32 +878,37 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
     uniforms.uExport.value = 0;
     if (decor.current) decor.current.visible = prevDecor;
     if (roofs.current) roofs.current.visible = prevRoofs;
+    if (worldGroup.current) worldGroup.current.rotation.y = prevWorldRot;
     if (slab.current) (slab.current.material as THREE.MeshStandardMaterial).color.set(view === "scan" ? colors.background : cityTheme(theme).plaza);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportSignal]);
 
-  const B = BUILDING_WIDTH;
   return (
     <>
       <ambientLight ref={ambient} intensity={1.8} />
       <hemisphereLight ref={hemi} args={[0xffffff, 0xd9ded1, 1.2]} />
       <directionalLight ref={keyLight} position={[10, 24, 8]} intensity={1.1} />
 
-      <mesh ref={slab} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
-        <planeGeometry args={[worldSize, worldSize]} />
-        <meshStandardMaterial color="#ece7db" roughness={0.96} metalness={0} />
-      </mesh>
+      <group ref={worldGroup}>
+        <mesh ref={slab} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]}>
+          <planeGeometry args={[worldSize, worldSize]} />
+          <meshStandardMaterial color="#ece7db" roughness={0.96} metalness={0} />
+        </mesh>
 
-      <instancedMesh ref={buildings} args={[undefined, undefined, Math.max(1, city.buildings.length)]} frustumCulled={false} material={buildingMat}>
-        <boxGeometry args={[1, 1, 1]} />
-      </instancedMesh>
+        <instancedMesh ref={buildings} args={[undefined, undefined, Math.max(1, city.buildings.length)]} frustumCulled={false} material={buildingMat}>
+          <boxGeometry args={[1, 1, 1]} />
+        </instancedMesh>
+        <instancedMesh ref={windowDots} args={[undefined, undefined, Math.max(1, windowData.length)]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshBasicMaterial vertexColors toneMapped={false} />
+        </instancedMesh>
 
-      <instancedMesh ref={roofs} args={[undefined, undefined, Math.max(1, roofCount * 3)]} frustumCulled={false}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial vertexColors roughness={0.9} metalness={0} />
-      </instancedMesh>
+        <instancedMesh ref={roofs} args={[undefined, undefined, Math.max(1, roofCount * 3)]} frustumCulled={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial vertexColors roughness={0.9} metalness={0} />
+        </instancedMesh>
 
-      <group ref={decor}>
+        <group ref={decor}>
         <instancedMesh ref={antennas} args={[undefined, undefined, Math.max(1, antennaCount)]} frustumCulled={false}>
           <boxGeometry args={[1, 1, 1]} />
           <meshStandardMaterial vertexColors roughness={0.8} />
@@ -786,11 +957,9 @@ function CityScene({ model, colors, view, roofDetail, growNonce, theme, mobile, 
           </bufferGeometry>
           <pointsMaterial size={0.14} color="#ffffff" transparent opacity={0} sizeAttenuation depthWrite={false} />
         </points>
+        </group>
       </group>
 
-      {B > 0 && view === "explore" && !reduced && (
-        <OrbitControls enablePan={false} minPolarAngle={0.15} maxPolarAngle={Math.PI / 2.2} enableDamping />
-      )}
     </>
   );
 }

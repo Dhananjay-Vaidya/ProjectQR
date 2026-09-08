@@ -17,7 +17,6 @@ import { DEFAULT_QR_COLORS, type QRModel } from "@/types/qr";
 import { detectWebgl } from "@/lib/hooks";
 import { CaptionPlate, ThemeAccent } from "@/components/ui/DioramaChrome";
 import { DEFAULT_THEME } from "@/lib/living/themes";
-import { EnterWithSound } from "@/components/audio/AudioControl";
 
 const LivingTreeQR = dynamic(() => import("@/components/qr/LivingTreeQR"), {
   ssr: false,
@@ -107,7 +106,6 @@ export function HeroPreview() {
           ) : (
             <div style={{ width: "100%", aspectRatio: "1/1" }} aria-hidden />
           )}
-          <EnterWithSound />
         </div>
         {previewModel ? (
           <CaptionPlate
