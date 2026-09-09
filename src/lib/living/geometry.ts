@@ -65,6 +65,17 @@ export function woodGeometry(tree: LivingTree): THREE.BufferGeometry {
     ),
   );
 
+  // Low, tapered buttress roots make the trunk feel planted without covering
+  // the QR's finder/timing area. They share the merged bark geometry/draw call.
+  const rootCount = 6;
+  for (let i = 0; i < rootCount; i++) {
+    const a = (i / rootCount) * Math.PI * 2 + 0.18;
+    const from = new THREE.Vector3(Math.cos(a) * 0.38, 0.52, Math.sin(a) * 0.38);
+    const mid = new THREE.Vector3(Math.cos(a) * 0.9, 0.18, Math.sin(a) * 0.9);
+    const to = new THREE.Vector3(Math.cos(a) * (1.35 + (i % 2) * 0.3), 0.04, Math.sin(a) * (1.35 + (i % 2) * 0.3));
+    pieces.push(paintBark(taperedTube([from, mid, to], 0.28, 0.025, 5, 5), tree.height, 0.04));
+  }
+
   for (const branch of tree.branches) {
     const from = new THREE.Vector3(...branch.from);
     const to = new THREE.Vector3(...branch.to);

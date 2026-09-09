@@ -121,7 +121,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
     }
   }, [model, theme, sizePx, tints]);
 
-  const tree = useMemo(() => generateLivingTree(model, quality.tier === "low"), [model, quality.tier]);
+  const tree = useMemo(() => generateLivingTree(model, quality.tier), [model, quality.tier]);
 
   useImperativeHandle(
     ref,
@@ -254,6 +254,7 @@ const LivingTreeQR = forwardRef<RendererHandle, LivingTreeQRProps>(function Livi
               customTrunk={customTrunk}
               leafPalette={leafPalette}
               mobile={quality.tier === "low"}
+              qualityTier={quality.tier}
               view={view}
               buildNonce={buildNonce}
               active={active.active}
@@ -293,6 +294,7 @@ interface SceneProps {
   customTrunk: string;
   leafPalette: LeafPaletteName;
   mobile: boolean;
+  qualityTier: "low" | "medium" | "high";
   view: "experience" | "scan";
   buildNonce: number;
   active: boolean;
@@ -346,6 +348,7 @@ function LivingScene({
   customTrunk,
   leafPalette,
   mobile,
+  qualityTier,
   view,
   buildNonce,
   active,
@@ -445,8 +448,8 @@ function LivingScene({
     return { leaf, tile, plate, lm, tm, gm, fm, base, wm, sm, rm, birdMat, butterflyMat, wood: woodGeometry(tree), slab: slabGeometry(side), tuft: tuftGeometry(), rain: rainGeometry(), bird: birdWingGeometry() };
   }, [tree, side, flatUniform]);
 
-  const birdCount = mobile ? 2 : 4;
-  const butterflyCount = mobile ? 3 : 8;
+  const birdCount = qualityTier === "low" ? 1 : qualityTier === "medium" ? 2 : 3;
+  const butterflyCount = qualityTier === "low" ? 2 : qualityTier === "medium" ? 5 : 8;
   const perch = useMemo(() => {
     const r = domainRng(buildGenerativeSeed(model.encodedUrl), "particleSeed");
     const tips = tree.branches.filter((b) => b.primary).map((b) => b.to as Vec3);

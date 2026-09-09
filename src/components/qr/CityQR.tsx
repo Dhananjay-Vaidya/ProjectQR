@@ -210,7 +210,7 @@ const CityQR = forwardRef<RendererHandle, CityQRProps>(function CityQR(
         onCreated={({ gl, scene }) => {
           glRef.current = gl;
           sceneRef.current = scene;
-          const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8");
+        const clear = new THREE.Color(cityTime === "night" ? "#081218" : "#F4F0E8");
           gl.setClearColor(clear, 1);
           scene.background = clear;
           onReady?.();
@@ -319,7 +319,7 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
   const previousView = useRef(view);
 
   const uniforms = useMemo(() => makeWindowUniforms(), []);
-  const buildingMat = useMemo(() => new THREE.MeshBasicMaterial({ color: "#C6BFB0", toneMapped: false }), []);
+  const buildingMat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#27333E", roughness: 0.88, metalness: 0.04 }), []);
   const exportMat = useMemo(() => new THREE.MeshBasicMaterial({ color: colors.foreground }), [colors.foreground]);
   const treeGeo = useMemo(() => plazaTreeGeometry(), []);
   const lampGeo = useMemo(() => lampGeometry(cityTheme(theme).lampColor), [theme]);
@@ -451,12 +451,14 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
         _d.scale.set(b.spanX, h0, b.spanZ);
         _d.updateMatrix();
         bm.setMatrixAt(i, _d.matrix);
+        bm.setColorAt(i, _c.set(b.klass === "protected" ? pal.roof : pal.facades[b.toneIndex]));
         // Scan view previews the flat verified QR: every dark module renders in
         // colors.foreground, matching the export exactly.
       }
       bm.geometry.setAttribute("aSeed", new THREE.InstancedBufferAttribute(seeds, 1));
       bm.count = city.buildings.length;
       bm.instanceMatrix.needsUpdate = true;
+      if (bm.instanceColor) bm.instanceColor.needsUpdate = true;
     }
 
     // roof detail (setback / hvac / spire), all in one mesh
@@ -629,7 +631,7 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
       gl.setClearColor(new THREE.Color(colors.background), 1);
       scene.background = new THREE.Color(colors.background);
     } else {
-      const clear = new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8");
+      const clear = new THREE.Color(cityTime === "night" ? "#081218" : "#F4F0E8");
       gl.setClearColor(clear, 1);
       scene.background = clear;
     }
@@ -664,8 +666,8 @@ function CityScene({ model, colors, view, roofDetail, cityTime, growNonce, theme
     if (timeT.current < 1) timeT.current = Math.min(1, timeT.current + delta / 0.95);
     const timeEase = timeT.current * timeT.current * (3 - 2 * timeT.current);
     const pal = lerpTheme(CITY_TIME_THEMES[fromTime.current], CITY_TIME_THEMES[cityTime], timeEase) ?? cityTheme(theme);
-    const clear = new THREE.Color(fromTime.current === "night" ? "#0E1718" : "#F4F0E8")
-      .lerp(new THREE.Color(cityTime === "night" ? "#0E1718" : "#F4F0E8"), timeEase)
+    const clear = new THREE.Color(fromTime.current === "night" ? "#081218" : "#F4F0E8")
+      .lerp(new THREE.Color(cityTime === "night" ? "#081218" : "#F4F0E8"), timeEase)
       .lerp(new THREE.Color(colors.background), pSmooth);
     gl.setClearColor(clear, 1);
     scene.background = clear;

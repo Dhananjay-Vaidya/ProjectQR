@@ -79,6 +79,8 @@ export interface LivingTree {
   platformSide: number;
 }
 
+export type LivingQuality = "low" | "medium" | "high";
+
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const mix = (a: Vec3, b: Vec3, t: number): Vec3 => a.map((v, i) => v + (b[i] - v) * t) as Vec3;
@@ -99,7 +101,9 @@ export function trunkPointAt(tree: Pick<LivingTree, "trunkSpline">, t: number): 
   ];
 }
 
-export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
+export function generateLivingTree(model: QRModel, quality: LivingQuality | boolean = "high"): LivingTree {
+  const tier: LivingQuality = typeof quality === "boolean" ? (quality ? "low" : "high") : quality;
+  const mobile = tier === "low";
   const seed = buildGenerativeSeed(model.encodedUrl);
   const structure = domainRng(seed, "branchSeed");
   const foliage = domainRng(seed, "shapeSeed");
@@ -126,11 +130,11 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   const clusters: FoliageCluster[] = [];
   const addCluster = (center: Vec3, scale = 1) => {
     const rx = (2.0 + foliage() * 0.8) * scale;
-    clusters.push({ center, radius: [rx, rx * 0.62, rx], phase: foliage() * TAU });
+    clusters.push({ center, radius: [rx, rx * (0.68 + foliage() * 0.12), rx * (0.9 + foliage() * 0.2)], phase: foliage() * TAU });
   };
   const addLeafMass = (center: Vec3, scale = 1) => {
     addCluster(center, scale);
-    const satellites = mobile ? 2 : 4;
+    const satellites = mobile ? 3 : tier === "medium" ? 5 : 6;
     for (let s = 0; s < satellites; s++) {
       const a = foliage() * TAU;
       const lift = (foliage() - 0.35) * scale;
@@ -187,6 +191,19 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   }
   addLeafMass(top, 0.82);
 
+  // Fill the rear and lower silhouette with independent, seeded masses. This
+  // prevents the rotatable diorama from reading as a front-facing umbrella.
+  const fillCount = mobile ? 5 : tier === "medium" ? 9 : 13;
+  for (let i = 0; i < fillCount; i++) {
+    const a = foliage() * TAU;
+    const band = i / Math.max(1, fillCount - 1);
+    addCluster([
+      Math.cos(a) * (1.3 + foliage() * 2.4),
+      height * (0.55 + band * 0.34) + (foliage() - 0.5) * 1.1,
+      Math.sin(a) * (1.3 + foliage() * 2.4),
+    ], 0.48 + foliage() * 0.34);
+  }
+
   /* ---- module inventory ---- */
   const modules: { row: number; col: number; x: number; z: number; free: number }[] = [];
   const finderDark: Vec3[] = [];
@@ -209,7 +226,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
     }
   }
 
-  const target = mobile ? 1800 : 6200;
+  const target = tier === "low" ? 3000 : tier === "medium" ? 4500 : 7200;
   const k = Math.max(3, Math.round(target / Math.max(1, modules.length)));
   modules.forEach((m) => (m.free = k));
 
@@ -294,7 +311,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
 
   /* ---- grass: finder tufts + sparse outer band + a dense ring around the trunk ---- */
   const grass: GroundCard[] = [];
-  const grassCap = mobile ? 1000 : 3000;
+  const grassCap = tier === "low" ? 1500 : tier === "medium" ? 3400 : 5200;
   const perFinder = mobile ? 2 : 3;
   for (const p of finderDark) {
     for (let b = 0; b < perFinder && grass.length < grassCap; b++) {
@@ -337,7 +354,7 @@ export function generateLivingTree(model: QRModel, mobile = false): LivingTree {
   }
   // Base ring: ~6 tufts per light module in the 1.5–3.5-module annulus, taller
   // near the trunk (0.7) tapering to 0.4 at the ring edge.
-  const perRing = mobile ? 9 : 18;
+  const perRing = mobile ? 9 : tier === "medium" ? 14 : 22;
   for (const p of ringLight) {
     const radial = Math.hypot(p[0], p[2]);
     const hUnits = 0.7 - ((radial - 1.5) / 2) * 0.3; // 0.7 → 0.4
